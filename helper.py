@@ -324,7 +324,7 @@ def get_BG_from_GRB(ins_name):
     return A, v_map, v_nodes, c_nodes, b_vars
 
 
-def get_a_new2(ins_name, couple = 0):
+def get_a_new2(ins_name, couple=0):
     epsilon = 1e-6
 
     # vars:  [obj coeff, norm_coeff, degree, Bin?]
@@ -334,6 +334,8 @@ def get_a_new2(ins_name, couple = 0):
 
     ncons = m.getNConss()
     nvars = m.getNVars()
+    cons = m.getConss()
+    new_cons = []
 
     mvars = m.getVars()
     mvars.sort(key=lambda v: v.name)
@@ -371,7 +373,7 @@ def get_a_new2(ins_name, couple = 0):
         v_indx = v_map[vnm]
         obj_cons[v_indx] = v
         if v != 0:
-            indices_spr[0].append(0)
+            indices_spr[0].append(ncons)
             indices_spr[1].append(v_indx)
             # values_spr.append(v)
             values_spr.append(1)
@@ -384,9 +386,6 @@ def get_a_new2(ins_name, couple = 0):
     obj_node[0] /= obj_node[1]
     # quit()
 
-    cons = m.getConss()
-    new_cons = []
-    ncons = len(cons)
     coupling_degrees = [0] * ncons
     cons_vars = []
     for cind, c in enumerate(cons):
@@ -495,5 +494,3 @@ def map_model_to_filtered_indices(m):
             filtered_idx += 1
 
     return model_to_filtered_index
-
-
