@@ -49,6 +49,26 @@ def get_label_by_kmeans(list):
     return sparse_cluster, labels
 
 
+def get_pair(critical_list, labels, critical_num):
+    # critical_list: 0/1 是否重要 （全都不包括等式约束）
+    # labels： 0/1 是否紧
+    # critical_num： 重要值
+    if len(labels) != len(critical_list):
+        return
+    scores = []
+    critical_num = normalize_to_range(critical_num)
+    for i in range(len(labels)):
+        score = 0
+        if labels[i]:
+            score += 5
+        elif critical_list[i]:
+            score += critical_num[i]
+        scores.append(score)
+
+    return scores
+
+
+
 def focal_loss(pre_cons, labels, weight, alpha=0.5, gamma=2.0):
     pos_loss = -alpha * ((1 - pre_cons + 1e-8) ** gamma) * (pre_cons + 1e-8).log() * (labels == 1).float()
     neg_loss = - (1 - alpha) * (pre_cons ** gamma) * (1 - pre_cons + 1e-8).log() * (labels == 0).float()
@@ -58,3 +78,22 @@ def focal_loss(pre_cons, labels, weight, alpha=0.5, gamma=2.0):
     loss = masked_con_loss.sum()
 
     return loss
+
+
+def normalize_to_range(data, new_min=0, new_max=2):
+    if not data:
+        raise ValueError("The input list is empty.")
+
+    old_min = min(data)
+    old_max = max(data)
+
+    if old_min == old_max:
+        # 如果所有元素都相同，则将它们都映射为 new_min（避免除以零）
+        return [new_min] * len(data)
+
+    # 归一化处理
+    normalized_data = [
+        new_min + (x - old_min) * (new_max - new_min) / (old_max - old_min)
+        for x in data
+    ]
+    return normalized_data

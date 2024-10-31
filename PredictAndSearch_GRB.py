@@ -2,6 +2,8 @@ import gurobipy
 import json
 from gurobipy import GRB
 import argparse
+
+import helper
 import test
 from test import validate_solution_in_original_model, change_model
 import random
@@ -18,7 +20,10 @@ def modify(model, n=0, k=0, fix=0):
         print("No optimal solution found.")
         return
     slacks = {constr: constr.slack for constr in model.getConstrs() if constr.Sense in ['<', '>']}
-    most_tight_constraints, count_tight = test.get_most_tight_constraints(slacks, tc_1)
+    filter_indices = [
+        model_to_filtered_index[i] for i in tc_1 if i in model_to_filtered_index
+    ]
+    most_tight_constraints, count_tight = test.get_most_tight_constraints(slacks, filter_indices)
     print(f"最优解和预测投影解中松弛度都为 0 的相同约束个数: {count_tight}")
     if fix == 0:
         print("****** do nothing! *********")
@@ -33,14 +38,14 @@ def modify(model, n=0, k=0, fix=0):
     tight_constraints = [constr for constr, slack in slacks.items() if slack == 0]
 
     if fix == 1:
-        print("固定方式:随机")
+        print("groundtruth 固定约束,固定方式:随机")
         random.shuffle(tight_constraints)
         most_tight_constraints = tight_constraints[:k]
     elif fix == 2:
-        print("固定方式:排序")
+        print("groundtruth 固定约束,固定方式:排序")
         most_tight_constraints = [constr for constr, slack in sorted_slacks[-k:]] if k > 0 else []
     elif fix == 3:
-        print("固定方式:交集")
+        print("groundtruth 固定约束,固定方式:交集")
     for constr in most_tight_constraints:
         row = model.getRow(constr)
         coeffs = []
@@ -129,7 +134,7 @@ max_infeas = -1
 max_time = 0
 
 ALL_Test = 100
-epoch = 1
+epoch = 3
 TestNum = round(ALL_Test / epoch)
 
 for e in range(epoch):
@@ -138,7 +143,7 @@ for e in range(epoch):
         test_ins_name = sample_names[(0 + e) * TestNum + ins_num]
         ins_name_to_read = f'./instance/test/{TaskName}/{test_ins_name}'
         # get bipartite graph as input
-        A, v_map, v_nodes, c_nodes, b_vars = get_a_new2(ins_name_to_read)
+        A, v_map, v_nodes, c_nodes, b_vars, _ = get_a_new2(ins_name_to_read)
         constraint_features = c_nodes.cpu()
         constraint_features[np.isnan(constraint_features)] = 1  # remove nan value
         variable_features = v_nodes
@@ -195,7 +200,7 @@ for e in range(epoch):
 
         # read instance
         m = gurobipy.read(ins_name_to_read)
-
+        model_to_filtered_index = helper.map_model_to_filtered_indices(m)
         # 修复预测初始解，得到初始可行解
         _, tc_1 = test.project_to_feasible_region_and_get_tight_constraints(m, x_pred)
         o_m = m.copy()
@@ -203,12 +208,12 @@ for e in range(epoch):
         m.Params.Threads = 32
         gurobipy.setParam('LogToConsole', 1)
 
-        # m.optimize()
-        # obj = m.objVal
-        obj = 23791.7
+        m.optimize()
+        obj = m.objVal
+        # obj = 23791.7
         print("gurobi 最优解：", obj)
         m.Params.LogFile = f'{log_folder}/{test_ins_name}.log'
-        modify(m, n=0, k=0, fix=0)  # if fix=0  do nothing
+        modify(m, n=0, k=1000, fix=1)  # if fix=0  do nothing
 
         # trust region method implemented by adding constraints
         instance_variabels = m.getVars()

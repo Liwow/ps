@@ -639,6 +639,107 @@ class GNNPolicy_constraint(torch.nn.Module):
         return con_output, var_output
 
 
+class GNNPolicy_loss(torch.nn.Module):
+    def __init__(self, TaskName=None):
+        super().__init__()
+        emb_size = 64
+        cons_nfeats = 4
+        edge_nfeats = 1
+        var_nfeats = 6
+
+        # CONSTRAINT EMBEDDING
+        self.cons_embedding = torch.nn.Sequential(
+            torch.nn.LayerNorm(cons_nfeats),
+            torch.nn.Linear(cons_nfeats, emb_size),
+            torch.nn.ReLU(),
+            torch.nn.Linear(emb_size, emb_size),
+            torch.nn.ReLU(),
+        )
+
+        # EDGE EMBEDDING
+        self.edge_embedding = torch.nn.Sequential(
+            torch.nn.LayerNorm(edge_nfeats),
+        )
+
+        # VARIABLE EMBEDDING
+        self.var_embedding = torch.nn.Sequential(
+            torch.nn.LayerNorm(var_nfeats),
+            torch.nn.Linear(var_nfeats, emb_size),
+            torch.nn.ReLU(),
+            torch.nn.Linear(emb_size, emb_size),
+            torch.nn.ReLU(),
+        )
+
+        self.conv_v_to_c = BipartiteGraphConvolution()
+        self.conv_c_to_v = BipartiteGraphConvolution()
+
+        # self.cross_attention = torch.nn.MultiheadAttention(embed_dim=64, num_heads=8, batch_first=True)
+
+        self.conv_v_to_c2 = BipartiteGraphConvolution()
+        self.conv_c_to_v2 = BipartiteGraphConvolution()
+
+        self.conv_c_to_v3 = BipartiteGraphConvolution()
+
+        self.tight_mlp = torch.nn.Sequential(
+            torch.nn.Linear(emb_size, emb_size),
+            torch.nn.ReLU(),
+            torch.nn.Linear(emb_size, 1, bias=False),
+        )
+
+        self.con_mlp = torch.nn.Sequential(
+            torch.nn.Linear(emb_size, emb_size),
+            torch.nn.ReLU(),
+            torch.nn.Linear(emb_size, 1, bias=False),
+        )
+
+        self.var_mlp = torch.nn.Sequential(
+            torch.nn.Linear(emb_size, emb_size),
+            torch.nn.ReLU(),
+            torch.nn.Linear(emb_size, 1, bias=False),
+        )
+
+    def forward(
+            self, constraint_features, edge_indices, edge_features, variable_features, c_mask=None
+            # , multimodal_features
+    ):
+        reversed_edge_indices = torch.stack([edge_indices[1], edge_indices[0]], dim=0)
+
+        # First step: linear embedding layers to a common dimension (64)
+        constraint_features = self.cons_embedding(constraint_features)
+        edge_features = self.edge_embedding(edge_features)
+        variable_features = self.var_embedding(variable_features)
+
+        # Two half convolutions
+        variable_features = self.conv_c_to_v(
+            constraint_features, edge_indices, edge_features, variable_features
+        )
+        constraint_features = self.conv_v_to_c(
+            variable_features, reversed_edge_indices, edge_features, constraint_features
+        )
+
+        variable_features = self.conv_c_to_v2(
+            constraint_features, edge_indices, edge_features, variable_features
+        )
+
+        constraint_features = self.conv_v_to_c2(
+            variable_features, reversed_edge_indices, edge_features, constraint_features
+        )
+
+        variable_features = self.conv_c_to_v3(
+            constraint_features, edge_indices, edge_features, variable_features
+        )
+        if c_mask is not None:
+            mask_constraint_features = constraint_features[c_mask == 1]
+        else:
+            mask_constraint_features = constraint_features
+
+        con_output = torch.sigmoid(self.con_mlp(mask_constraint_features).squeeze(-1))
+        tight_output = torch.sigmoid(self.tight_mlp(mask_constraint_features).squeeze(-1))
+        var_output = torch.sigmoid(self.var_mlp(variable_features).squeeze(-1))
+
+        return con_output, var_output, tight_output
+
+
 class GraphDataset_position(torch_geometric.data.Dataset):
     """
     This class encodes a collection of graphs, as well as a method to load such graphs from the disk.
@@ -776,6 +877,7 @@ class GraphDataset_constraint(torch_geometric.data.Dataset):
                 if lhs != rhs:
                     lin_expr = model.getValsLinear(constr)
                     num_vars = len(lin_expr)
+                    num_vars_per_constr.append(num_vars)
                     critical_list.append(1 if num_vars <= n else 0)
         elif method == "kmeans":
             for constr in model.getConss():
@@ -790,7 +892,7 @@ class GraphDataset_constraint(torch_geometric.data.Dataset):
             print("no select way")
             return None
 
-        return critical_list
+        return critical_list, num_vars_per_constr
 
     def get(self, index):
         """
@@ -799,11 +901,13 @@ class GraphDataset_constraint(torch_geometric.data.Dataset):
 
         # nbp, sols, objs, varInds, varNames = self.process_sample(self.sample_files[index])
         BG, sols, objs, varNames, slacks = self.process_sample(self.sample_files[index])
-        critical_list = self.get_critical(self.sample_files[index], method="fix")
+        critical_list_by_sparse, var_num_list = self.get_critical(self.sample_files[index], method="fix")
 
         A, v_map, v_nodes, c_nodes, b_vars, coupling_degrees = BG
         sparse_cluster, labels = utils.get_label_by_kmeans(coupling_degrees)
         critical_list_by_coupling = [1 if label == sparse_cluster else 0 for label in labels]
+
+        critical_list = critical_list_by_coupling
 
         constraint_features = c_nodes
         edge_indices = A._indices()
@@ -828,10 +932,145 @@ class GraphDataset_constraint(torch_geometric.data.Dataset):
             labels = [1 if con[1] == 0 and con[2] in ['<', '>'] else 0 for con in slack]
             mask = torch.tensor(mask, dtype=torch.float32)
             labels = torch.tensor(labels, dtype=torch.int)
-            labels = torch.bitwise_and(labels[mask == 1], torch.tensor(critical_list_by_coupling, dtype=torch.int))
+            labels = torch.bitwise_and(labels[mask == 1], torch.tensor(critical_list, dtype=torch.int))
             c_mask.append(mask)
             c_labels.append(labels.float())
         graph.c_labels = torch.cat(c_labels).reshape(-1)
+        graph.c_mask = torch.cat(c_mask).reshape(-1)
+
+        # We must tell pytorch geometric how many nodes there are, for indexing purposes
+        graph.num_nodes = constraint_features.shape[0] + variable_features.shape[0]
+        graph.solutions = torch.FloatTensor(sols).reshape(-1)
+
+        graph.objVals = torch.FloatTensor(objs)
+        graph.ncons = len(slacks[1])
+        graph.nlabels = c_labels[1].size()[0]
+        graph.nsols = sols.shape[0]
+        graph.ntvars = variable_features.shape[0]
+        graph.varNames = varNames
+        varname_dict = {}
+        varname_map = []
+        i = 0
+        for iter in varNames:
+            varname_dict[iter] = i
+            i += 1
+        for iter in v_map:
+            varname_map.append(varname_dict[iter])
+
+        varname_map = torch.tensor(varname_map)
+
+        graph.varInds = [[varname_map], [b_vars]]
+
+        return graph
+
+
+class GraphDataset_loss(torch_geometric.data.Dataset):
+
+    def __init__(self, sample_files):
+        super().__init__(root=None, transform=None, pre_transform=None)
+        self.sample_files = sample_files
+
+    def len(self):
+        return len(self.sample_files)
+
+    def process_sample(self, filepath):
+        BGFilepath, solFilePath = filepath
+        with open(BGFilepath, "rb") as f:
+            bgData = pickle.load(f)
+        try:
+            with open(solFilePath, 'rb') as f:
+                solData = pickle.load(f)
+        except Exception as e:
+            print(f"Error: {e}, file: {solFilePath}")
+
+        BG = bgData
+        varNames = solData['var_names']
+
+        sols = solData['sols'][:50]  # [0:300]
+        objs = solData['objs'][:50]  # [0:300]
+        slacks = solData['slacks'][:50]
+        sols = np.round(sols, 0)
+        return BG, sols, objs, varNames, slacks
+
+    def get_critical(self, path, method="fix", n=15):
+        file = os.path.basename(path[0])[:-3]
+        task_name = path[0].split('/')[-3]
+        instance_path = './instance/train/' + task_name + '/' + file
+        model = scip.Model()
+        model.setParam('display/verblevel', 0)  # 禁用显示信息
+        model.setParam('display/freq', 0)
+        model.readProblem(instance_path)
+        critical_list = []
+        num_vars_per_constr = []
+        if method == "fix":
+            for constr in model.getConss():
+                rhs = model.getRhs(constr)
+                lhs = model.getLhs(constr)
+                if lhs != rhs:
+                    lin_expr = model.getValsLinear(constr)
+                    num_vars = len(lin_expr)
+                    num_vars_per_constr.append(num_vars)
+                    critical_list.append(1 if num_vars <= n else 0)
+        elif method == "kmeans":
+            for constr in model.getConss():
+                rhs = model.getRhs(constr)
+                lhs = model.getLhs(constr)
+                if lhs != rhs:
+                    lin_expr = model.getValsLinear(constr)
+                    num_vars_per_constr.append(len(lin_expr))
+            sparse_cluster, labels = utils.get_label_by_kmeans(num_vars_per_constr)
+            critical_list = [1 if label == sparse_cluster else 0 for label in labels]
+        else:
+            print("no select way")
+            return None
+
+        return critical_list, num_vars_per_constr
+
+    def get(self, index):
+        """
+        This method loads a node bipartite graph observation as saved on the disk during data collection.
+        """
+
+        # nbp, sols, objs, varInds, varNames = self.process_sample(self.sample_files[index])
+        BG, sols, objs, varNames, slacks = self.process_sample(self.sample_files[index])
+        critical_list_by_sparse, var_num_list = self.get_critical(self.sample_files[index], method="fix")
+
+        A, v_map, v_nodes, c_nodes, b_vars, coupling_degrees = BG
+        sparse_cluster, labels = utils.get_label_by_kmeans(coupling_degrees)
+        critical_list_by_coupling = [1 if label == sparse_cluster else 0 for label in labels]
+
+        critical_list = critical_list_by_coupling
+
+        constraint_features = c_nodes
+        edge_indices = A._indices()
+
+        variable_features = v_nodes
+        edge_features = A._values().unsqueeze(1)
+        edge_features = torch.ones(edge_features.shape)
+
+        constraint_features[np.isnan(constraint_features)] = 1
+
+        graph = BipartiteNodeData(
+            torch.FloatTensor(constraint_features),
+            torch.LongTensor(edge_indices),
+            torch.FloatTensor(edge_features),
+            torch.FloatTensor(variable_features),
+        )
+
+        c_mask = []
+        c_labels = []
+        t_labels = []
+        for slack in slacks:
+            mask = [1 if con[2] in ['<', '>'] else 0 for con in slack]
+            labels = [1 if con[1] == 0 and con[2] in ['<', '>'] else 0 for con in slack]
+            mask = torch.tensor(mask, dtype=torch.float32)
+            labels = torch.tensor(labels, dtype=torch.int)
+            cc_labels = torch.bitwise_and(labels[mask == 1], torch.tensor(critical_list, dtype=torch.int))
+            c_mask.append(mask)
+            t_labels.append(labels[mask == 1].float())
+            c_labels.append(cc_labels.float())
+        graph.c_labels = torch.cat(c_labels).reshape(-1)
+        graph.t_labels = torch.cat(t_labels).reshape(-1)
         graph.c_mask = torch.cat(c_mask).reshape(-1)
 
         # We must tell pytorch geometric how many nodes there are, for indexing purposes

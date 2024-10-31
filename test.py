@@ -2,7 +2,9 @@ import os
 import shutil
 import gurobipy as gp
 import torch
+import numpy as np
 from gurobipy import GRB
+from helper import map_model_to_filtered_indices
 
 
 def ss():
@@ -24,6 +26,71 @@ def ss():
             shutil.copy(src_path, dst_path)
         else:
             print(f"Source file {src_path} not found.")
+
+
+def constrain_search(m, o_m, new_solution, BD, tight_pred, k0, k1, kc):
+    model_to_filtered_index = map_model_to_filtered_indices(o_m)
+    pre_cons, pre_sols = BD
+    vars_list = o_m.getVars()
+    assert len(vars_list) == len(pre_sols), "x_pred 的长度必须与模型变量数一致"
+
+    sorted_indices = torch.argsort(pre_sols)
+    topk0_indices = sorted_indices[:k0] if k0 != 0 else torch.tensor([])
+    topk1_indices = sorted_indices[-k1:] if k1 != 0 else torch.tensor([])
+
+    # k = 0
+    # fixed_vars = set()
+    # for idx in topk0_indices.tolist():
+    #     var_name = vars_list[idx].VarName
+    #     if var_name in new_solution and new_solution[var_name] == 0:
+    #         k += 1
+    #         var = vars_list[idx]
+    #         var.LB = 0
+    #         var.UB = 0
+    #         fixed_vars.add(var_name)
+    #
+    # for idx in topk1_indices.tolist():
+    #     var_name = vars_list[idx].VarName
+    #     if var_name in new_solution and new_solution[var_name] == 1:
+    #         k += 1
+    #         var = vars_list[idx]
+    #         var.LB = 1
+    #         var.UB = 1
+    #         fixed_vars.add(var_name)
+
+    tight_constraints = {}
+    num = len(o_m.getConstrs())
+    for cind, constr in enumerate(m.getConstrs()):
+        num -= 1
+        slack = constr.getAttr(GRB.Attr.Slack)
+        if abs(slack) < 1e-6 and constr.Sense != GRB.EQUAL:
+            idx = model_to_filtered_index[cind]
+            if idx not in tight_pred:
+                tight_constraints[idx] = constr
+        if num == 0:
+            break
+    k = 0
+    min_topk = min(200, pre_cons.size(0))
+    topk_indices = torch.topk(pre_cons, min_topk).indices
+    for i in range(len(topk_indices) - kc):
+        index = topk_indices[i + kc].item()
+        if index in tight_constraints.keys():
+            k += 1
+            constr = tight_constraints[index]
+            constr_name = constr.ConstrName
+            o_constr = o_m.getConstrByName(constr_name)
+            o_constr.Sense = GRB.EQUAL
+    # for constr in tight_constraints:
+    #     # 怎么取有讲究
+    #     sample = np.random.normal()
+    #     if sample > 0.5:
+    #         k += 1
+    #         constr_name = constr.ConstrName
+    #         o_constr = o_m.getConstrByName(constr_name)
+    #         o_constr.Sense = GRB.EQUAL
+    o_m.update()
+
+    return o_m
 
 
 def project_to_feasible_region_and_get_tight_constraints(model, x_pred):
@@ -194,7 +261,30 @@ def main(file_path, n=0, m=0):
         print(f"General Error: {str(e)}")
 
 
+def search(m, scores, delta):
+    instance_variabels = m.getVars()
+    instance_variabels.sort(key=lambda v: v.VarName)
+    variabels_map = {}
+    for v in instance_variabels:  # get a dict (variable map), varname:var clasee
+        variabels_map[v.VarName] = v
+    alphas = []
+    for i in range(len(scores)):
+        tar_var = variabels_map[scores[i][1]]  # target variable <-- variable map
+        x_star = scores[i][3]  # 1,0,-1, decide whether need to fix
+        if x_star < 0:
+            continue
+        # tmp_var = m1.addVar(f'alp_{tar_var}', 'C')
+        tmp_var = m.addVar(name=f'alp_{tar_var}', vtype=GRB.CONTINUOUS)
+        alphas.append(tmp_var)
+        m.addConstr(tmp_var >= tar_var - x_star, name=f'alpha_up_{i}')
+        m.addConstr(tmp_var >= x_star - tar_var, name=f'alpha_dowm_{i}')
+    all_tmp = 0
+    for tmp in alphas:
+        all_tmp += tmp
+    m.addConstr(all_tmp <= delta, name="sum_alpha")
+    return m
+
+
 if __name__ == "__main__":
     file = "./instance/test/CA_m/CA_m_69.lp"
     main(file, n=0, m=30)
-

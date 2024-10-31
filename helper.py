@@ -324,7 +324,7 @@ def get_BG_from_GRB(ins_name):
     return A, v_map, v_nodes, c_nodes, b_vars
 
 
-def get_a_new2(ins_name):
+def get_a_new2(ins_name, couple=0):
     epsilon = 1e-6
 
     # vars:  [obj coeff, norm_coeff, degree, Bin?]
@@ -334,6 +334,8 @@ def get_a_new2(ins_name):
 
     ncons = m.getNConss()
     nvars = m.getNVars()
+    cons = m.getConss()
+    new_cons = []
 
     mvars = m.getVars()
     mvars.sort(key=lambda v: v.name)
@@ -371,7 +373,7 @@ def get_a_new2(ins_name):
         v_indx = v_map[vnm]
         obj_cons[v_indx] = v
         if v != 0:
-            indices_spr[0].append(0)
+            indices_spr[0].append(ncons)
             indices_spr[1].append(v_indx)
             # values_spr.append(v)
             values_spr.append(1)
@@ -384,37 +386,35 @@ def get_a_new2(ins_name):
     obj_node[0] /= obj_node[1]
     # quit()
 
-    cons = m.getConss()
-    new_cons = []
+    coupling_degrees = [0] * ncons
+    cons_vars = []
     for cind, c in enumerate(cons):
         coeff = m.getValsLinear(c)
+        cons_vars.append(set(coeff.keys()))
         if len(coeff) == 0:
             # print(coeff,c)
             continue
-        new_cons.append(c)
-    cons = new_cons
-    ncons = len(cons)
-    cons_map = [[x, len(m.getValsLinear(x))] for x in cons]
+        # new_cons.append(c)
+    # cons = new_cons
+    # ncons = len(cons)
+    # cons_map = [[x, len(m.getValsLinear(x))] for x in cons]
     # sort
     # cons_map = sorted(cons_map, key=lambda x: [x[1], str(x[0])])
-    cons = [x[0] for x in cons_map]
-    cons_name_map = [c.name for c in cons]
-
-    # 计算耦合度
-    coupling_degrees = [0] * ncons
-    cons_vars = []
-    for c in cons:
-        coeff = m.getValsLinear(c)
-        cons_vars.append(set(coeff.keys()))  # 将约束涉及的变量存为集合
+    # cons = [x[0] for x in cons_map]
+    # cons_name_map = [c.name for c in cons]
 
     # **计算每个约束的耦合度**
-    for i in range(ncons):
-        for j in range(i + 1, ncons):
-            # 计算约束 i 和 j 共享的变量数量
-            shared_vars = cons_vars[i].intersection(cons_vars[j])
-            # 更新耦合度
-            coupling_degrees[i] += len(shared_vars)
-            coupling_degrees[j] += len(shared_vars)
+    if couple != 0:
+        for i, c in enumerate(cons):
+            rhs = m.getRhs(c)
+            lhs = m.getLhs(c)
+            if rhs != lhs:
+                for j in range(i + 1, ncons):
+                    # 计算约束 i 和 j 共享的变量数量
+                    shared_vars = cons_vars[i].intersection(cons_vars[j])
+                    # 更新耦合度
+                    coupling_degrees[i] += len(shared_vars)
+                    coupling_degrees[j] += len(shared_vars)
 
     lcons = ncons
     c_nodes = []
@@ -494,5 +494,3 @@ def map_model_to_filtered_indices(m):
             filtered_idx += 1
 
     return model_to_filtered_index
-
-

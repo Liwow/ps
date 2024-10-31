@@ -12,6 +12,8 @@ import torch
 from time import time
 from helper import get_a_new2
 
+kc = 20
+
 
 def modify(model, n=0, k=0, fix=0):
     # fix 0:no fix 1:随机 2:排序 3: 交集
@@ -19,11 +21,11 @@ def modify(model, n=0, k=0, fix=0):
         print("No optimal solution found.")
         return
     slacks = {constr: constr.slack for constr in model.getConstrs() if constr.Sense in ['<', '>']}
-    filter_indices = [
-        model_to_filtered_index[i] for i in tc_1 if i in model_to_filtered_index
-    ]
-    most_tight_constraints, count_tight = test.get_most_tight_constraints(slacks, filter_indices)
-    print(f"最优解和预测投影解中松弛度都为 0 的相同约束个数: {count_tight}")
+    # filter_indices = [
+    #     model_to_filtered_index[i] for i in tc_1 if i in model_to_filtered_index
+    # ]
+    # most_tight_constraints, count_tight = test.get_most_tight_constraints(slacks, filter_indices)
+    # print(f"最优解和预测投影解中松弛度都为 0 的相同约束个数: {count_tight}")
     if fix == 0:
         print("****** do nothing! *********")
         return
@@ -42,7 +44,7 @@ def modify(model, n=0, k=0, fix=0):
         most_tight_constraints = tight_constraints[:k]
     elif fix == 2:
         print("groundtruth 固定约束,固定方式:排序")
-        most_tight_constraints = [constr for constr, slack in sorted_slacks[-200-k:-200]] if k > 0 else []
+        most_tight_constraints = [constr for constr, slack in sorted_slacks[-k:0]] if k > 0 else []
     elif fix == 3:
         print("groundtruth 固定约束,固定方式:交集")
     for constr in most_tight_constraints:
@@ -57,16 +59,25 @@ def modify(model, n=0, k=0, fix=0):
 
 
 def modify_by_predict(model, predict, k=0, fix=0, th=99, n=0):
+    # k = 5 if e != 2 else k
+    # min_topk = min(30, pre_t.size(0))
+    # top_indices = torch.topk(pre_t, min_topk).indices
+    # tight_mask = torch.zeros_like(pre_t)
+    # tight_mask[top_indices] = 1
+    # tight_constraints = torch.nonzero(tight_mask == 1, as_tuple=True)[0]
+
     min_topk = min(k, predict.size(0))
     topk_indices = torch.topk(predict, min_topk).indices
-    tight_mask = torch.zeros_like(predict)
-    tight_mask[topk_indices] = 1
-    tight_constraints = torch.nonzero(tight_mask == 1, as_tuple=True)[0].tolist()
-    filter_indices = [
-        model_to_filtered_index[i] for i in tc_1 if i in model_to_filtered_index
-    ]
-    most_tight_constraints = list(set(tight_constraints) & set(filter_indices))
-    print(f"预测约束和预测投影解中松弛度都为 0 的相同约束个数: {len(most_tight_constraints)}")
+    critical_mask = torch.zeros_like(predict)
+    critical_mask[topk_indices] = 1
+    critical_constraints = torch.nonzero(critical_mask == 1, as_tuple=True)[0]
+    ct_constraints = critical_constraints
+    # ct_constraints = critical_constraints[torch.isin(critical_constraints, tight_constraints)].tolist()
+    # filter_indices = [
+    #     model_to_filtered_index[i] for i in tc_1 if i in model_to_filtered_index
+    # ]
+    # most_tight_constraints = list(set(tight_constraints) & set(filter_indices))
+    # print(f"预测约束和预测投影解中松弛度都为 0 的相同约束个数: {len(most_tight_constraints)}")
     if model.Status in [GRB.OPTIMAL, GRB.TIME_LIMIT]:
         slacks = {constr: constr.slack for constr in model.getConstrs() if constr.Sense in ['<', '>']}
         slacks_indices = [i for i, constr in enumerate(model.getConstrs())
@@ -76,18 +87,18 @@ def modify_by_predict(model, predict, k=0, fix=0, th=99, n=0):
         ]
         all_indices = torch.topk(predict, sum(1 for value in slacks.values() if value == 0)).indices.tolist()
         correct_tight_list = list(set(slacks_indices) & set(all_indices))
-        print("correct_tight_list number: ", len(correct_tight_list))
+        # print("correct_tight_list number: ", len(correct_tight_list))
         wrong_indices = [i for i, value in enumerate(all_indices) if value not in slacks_indices]
         print(f"预测错的元素索引: {wrong_indices}")
-        most_tight_constraints, count_tight = test.get_most_tight_constraints(slacks, tight_constraints)
-        print(f"最优解和预测约束中松弛度都为 0 的相同约束个数: {count_tight}")
+        most_tight_constraints, count_tight = test.get_most_tight_constraints(slacks, ct_constraints)
+        # print(f"最优解和预测约束中松弛度都为 0 的相同约束个数: {count_tight}")
     if fix == 0:
         print("****** predict do nothing! *********")
         return
     cons = model.getConstrs()
     remove_num = 0
     for idx, c in enumerate(cons):
-        if idx in model_to_filtered_index.keys() and model_to_filtered_index[idx] in tight_constraints:
+        if idx in model_to_filtered_index.keys() and model_to_filtered_index[idx] in ct_constraints:
             row = model.getRow(c)
             coeffs = []
             vars = []
@@ -96,9 +107,11 @@ def modify_by_predict(model, predict, k=0, fix=0, th=99, n=0):
                 vars.append(row.getVar(i))
             if c.Sense in ['<', '>'] and len(vars) < th:
                 remove_num += 1
-                model.remove(c)
-                model.addConstr(gurobipy.LinExpr(coeffs, vars) == c.RHS, name=f"{c.ConstrName}_tight")
+                c.Sense = GRB.EQUAL
+                # model.remove(c)
+                # model.addConstr(gurobipy.LinExpr(coeffs, vars) == c.RHS, name=f"{c.ConstrName}_tight")
     print("remove_num: ", remove_num, ", 阈值：", th)
+    return ct_constraints
 
 
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -106,7 +119,7 @@ random.seed(0)
 torch.manual_seed(0)
 torch.cuda.manual_seed(0)
 multimodal = False
-TaskName = "CA_m_ccon2"
+TaskName = "CA_m_ccon1"
 if TaskName == "CA_multi":
     multimodal = True
 # load pretrained model
@@ -156,7 +169,6 @@ def test_hyperparam(task):
 
 
 k_0, k_1, delta = test_hyperparam(TaskName)
-
 # set log folder
 solver = 'GRB'
 test_task = f'{TaskName}_{solver}_Predect&Search'
@@ -184,7 +196,7 @@ TestNum = round(ALL_Test / epoch)
 for e in range(epoch):
     for ins_num in range(TestNum):
         t_start = time()
-        test_ins_name = sample_names[1 * TestNum + ins_num]
+        test_ins_name = sample_names[2 * TestNum + ins_num]
         ins_name_to_read = f'./instance/test/{TaskName}/{test_ins_name}'
         # get bipartite graph as input
         A, v_map, v_nodes, c_nodes, b_vars, _ = get_a_new2(ins_name_to_read)
@@ -200,7 +212,7 @@ for e in range(epoch):
         m = gurobipy.read(ins_name_to_read)
         cons = m.getConstrs()
         c_masks = [1 if con.sense in ['<', '>'] else 0 for con in cons]
-        c_masks.append(0) # add obj
+        c_masks.append(0)  # add obj
         c_masks = torch.tensor(c_masks, dtype=torch.float32)
 
         # prediction
@@ -215,7 +227,8 @@ for e in range(epoch):
         pre_cons, pre_sols = BD
         pre_cons = pre_cons.cpu().squeeze()
         pre_sols = pre_sols.cpu().squeeze()
-        x_pred = (pre_sols > 0.5).float()
+        # pre_t = pre_t.cpu().squeeze()
+        x_pred = torch.round(pre_sols)
 
         # align the variable name betweend the output and the solver
         all_varname = []
@@ -256,47 +269,33 @@ for e in range(epoch):
         # read instance
         model_to_filtered_index = helper.map_model_to_filtered_indices(m)
         # 修复预测初始解，得到初始可行解
-        _, tc_1 = test.project_to_feasible_region_and_get_tight_constraints(m, x_pred)
+        # _, tc_1 = test.project_to_feasible_region_and_get_tight_constraints(m, x_pred)
         o_m = m.copy()
         m.Params.TimeLimit = 1000
         m.Params.Threads = 32
+        # m.Params.MIPFocus = 1
         gurobipy.setParam('LogToConsole', 1)
 
-        m.optimize()
-        obj = m.objVal
-        # obj = 23791.7
+        # m.optimize()
+        # obj = m.objVal
+        obj = 23791.7
         print("gurobi 最优解：", obj)
         m.Params.LogFile = f'{log_folder}/{test_ins_name}.log'
         # fix 0:no fix 1:随机 2:排序 3: 交集
-        modify(m, n=0, k=50, fix=0)  # if fix=0  do nothing
-        modify_by_predict(m, pre_cons, k=10, fix=1)
+        modify(m, n=0, k=100, fix=0)  # if fix=0  do nothing
+        tight_constraints = modify_by_predict(m, pre_cons, k=kc, fix=1)
 
         # trust region method implemented by adding constraints
-        instance_variabels = m.getVars()
-        instance_variabels.sort(key=lambda v: v.VarName)
-        variabels_map = {}
-        for v in instance_variabels:  # get a dict (variable map), varname:var clasee
-            variabels_map[v.VarName] = v
-        alphas = []
-        for i in range(len(scores)):
-            tar_var = variabels_map[scores[i][1]]  # target variable <-- variable map
-            x_star = scores[i][3]  # 1,0,-1, decide whether need to fix
-            if x_star < 0:
-                continue
-            # tmp_var = m1.addVar(f'alp_{tar_var}', 'C')
-            tmp_var = m.addVar(name=f'alp_{tar_var}', vtype=GRB.CONTINUOUS)
-            alphas.append(tmp_var)
-            m.addConstr(tmp_var >= tar_var - x_star, name=f'alpha_up_{i}')
-            m.addConstr(tmp_var >= x_star - tar_var, name=f'alpha_dowm_{i}')
-        all_tmp = 0
-        for tmp in alphas:
-            all_tmp += tmp
-        m.addConstr(all_tmp <= delta, name="sum_alpha")
+        m = test.search(m, scores, delta)
         m.update()
         m.optimize()
-
         new_solution = {var.VarName: var.X for var in m.getVars()}
         test.validate_solution_in_original_model(o_m, new_solution)
+        o_m = test.constrain_search(m, o_m, new_solution, BD, tight_constraints, k_0, k_1, kc)
+        o_m = test.search(o_m, scores, delta)
+        o_m.update()
+        o_m.optimize()
+        print(f"search 最优值：{o_m.objVal}")
 
         t = time() - t_start
         time_total += t
