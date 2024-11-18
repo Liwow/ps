@@ -3,6 +3,7 @@ import os
 from sklearn.cluster import KMeans
 from transformers import T5Tokenizer, T5EncoderModel
 import torch
+import torch.nn as nn
 import torch_geometric
 import gzip
 import pickle
@@ -211,7 +212,7 @@ class GraphDataset(torch_geometric.data.Dataset):
         edge_features = A._values().unsqueeze(1)
         edge_features = torch.ones(edge_features.shape)
 
-        constraint_features[np.isnan(constraint_features)] = 1
+        constraint_features[torch.isnan(constraint_features)] = 1
 
         graph = BipartiteNodeData(
             torch.FloatTensor(constraint_features),
@@ -646,7 +647,7 @@ class GNNPolicy_loss(torch.nn.Module):
         cons_nfeats = 4
         edge_nfeats = 1
         var_nfeats = 6
-
+        self.temperature = 0.6
         # CONSTRAINT EMBEDDING
         self.cons_embedding = torch.nn.Sequential(
             torch.nn.LayerNorm(cons_nfeats),
@@ -680,15 +681,12 @@ class GNNPolicy_loss(torch.nn.Module):
 
         self.conv_c_to_v3 = BipartiteGraphConvolution()
 
-        self.tight_mlp = torch.nn.Sequential(
-            torch.nn.Linear(emb_size, emb_size),
-            torch.nn.ReLU(),
-            torch.nn.Linear(emb_size, 1, bias=False),
-        )
+        self.encoderlayer = nn.TransformerEncoderLayer(d_model=64, nhead=4,
+                                                       dim_feedforward=128, dropout=0.1,
+                                                       activation='gelu', batch_first=True)
 
         self.con_mlp = torch.nn.Sequential(
-            torch.nn.Linear(emb_size, emb_size),
-            torch.nn.ReLU(),
+            nn.TransformerEncoder(self.encoderlayer, num_layers=2),
             torch.nn.Linear(emb_size, 1, bias=False),
         )
 
@@ -733,11 +731,10 @@ class GNNPolicy_loss(torch.nn.Module):
         else:
             mask_constraint_features = constraint_features
 
-        con_output = torch.sigmoid(self.con_mlp(mask_constraint_features).squeeze(-1))
-        tight_output = torch.sigmoid(self.tight_mlp(mask_constraint_features).squeeze(-1))
-        var_output = torch.sigmoid(self.var_mlp(variable_features).squeeze(-1))
+        con_output = torch.sigmoid(self.con_mlp(mask_constraint_features).squeeze(-1) / self.temperature)
+        var_output = torch.sigmoid(self.var_mlp(variable_features).squeeze(-1) / self.temperature)
 
-        return con_output, var_output, tight_output
+        return con_output, var_output
 
 
 class GraphDataset_position(torch_geometric.data.Dataset):
@@ -916,7 +913,7 @@ class GraphDataset_constraint(torch_geometric.data.Dataset):
         edge_features = A._values().unsqueeze(1)
         edge_features = torch.ones(edge_features.shape)
 
-        constraint_features[np.isnan(constraint_features)] = 1
+        constraint_features[torch.isnan(constraint_features)] = 1
 
         graph = BipartiteNodeData(
             torch.FloatTensor(constraint_features),
@@ -1048,7 +1045,7 @@ class GraphDataset_loss(torch_geometric.data.Dataset):
         edge_features = A._values().unsqueeze(1)
         edge_features = torch.ones(edge_features.shape)
 
-        constraint_features[np.isnan(constraint_features)] = 1
+        constraint_features[torch.isnan(constraint_features)] = 1
 
         graph = BipartiteNodeData(
             torch.FloatTensor(constraint_features),

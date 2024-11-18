@@ -68,16 +68,13 @@ def get_pair(critical_list, labels, critical_num):
     return scores
 
 
-
-def focal_loss(pre_cons, labels, weight, alpha=0.5, gamma=2.0):
-    pos_loss = -alpha * ((1 - pre_cons + 1e-8) ** gamma) * (pre_cons + 1e-8).log() * (labels == 1).float()
-    neg_loss = - (1 - alpha) * (pre_cons ** gamma) * (1 - pre_cons + 1e-8).log() * (labels == 0).float()
+def focal_loss(pre_cons, labels, weight, alpha=0.75, gamma=0.8):
+    pos_loss = - 2 * alpha * ((1 - pre_cons + 1e-8) ** gamma) * (pre_cons + 1e-8).log() * (labels == 1).float()
+    neg_loss = - 2 * (1 - alpha) * (pre_cons ** gamma) * (1 - pre_cons + 1e-8).log() * (labels == 0).float()
 
     masked_con_loss = (pos_loss + neg_loss) * weight[:, None]
 
-    loss = masked_con_loss.sum()
-
-    return loss
+    return masked_con_loss
 
 
 def normalize_to_range(data, new_min=0, new_max=2):

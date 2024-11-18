@@ -12,7 +12,7 @@ import torch
 from time import time
 from helper import get_a_new2
 
-kc = 20
+kc = 10
 
 
 def modify(model, n=0, k=0, fix=0):
@@ -58,9 +58,8 @@ def modify(model, n=0, k=0, fix=0):
         model.addConstr(gurobipy.LinExpr(coeffs, vars) == constr.RHS, name=f"{constr.ConstrName}_tight")
 
 
-def modify_by_predict(model, predict, k=0, fix=0, th=99, n=0):
-    # k = 5 if e != 2 else k
-    # min_topk = min(30, pre_t.size(0))
+def modify_by_predict(model, predict, k=0, fix=0, th=30, n=0):
+    # min_topk = min(250, pre_t.size(0))
     # top_indices = torch.topk(pre_t, min_topk).indices
     # tight_mask = torch.zeros_like(pre_t)
     # tight_mask[top_indices] = 1
@@ -119,7 +118,7 @@ random.seed(0)
 torch.manual_seed(0)
 torch.cuda.manual_seed(0)
 multimodal = False
-TaskName = "CA_m_ccon1"
+TaskName = "CA_m_ccon"
 if TaskName == "CA_multi":
     multimodal = True
 # load pretrained model
@@ -138,7 +137,7 @@ state = torch.load(pathstr, map_location=torch.device('cuda:0'))
 policy.load_state_dict(state)
 
 # 4 public datasets, IS, WA, CA, IP
-TaskName = 'CA_m'
+TaskName = 'CA'
 
 
 def test_hyperparam(task):
@@ -196,7 +195,7 @@ TestNum = round(ALL_Test / epoch)
 for e in range(epoch):
     for ins_num in range(TestNum):
         t_start = time()
-        test_ins_name = sample_names[2 * TestNum + ins_num]
+        test_ins_name = sample_names[e * TestNum + ins_num]
         ins_name_to_read = f'./instance/test/{TaskName}/{test_ins_name}'
         # get bipartite graph as input
         A, v_map, v_nodes, c_nodes, b_vars, _ = get_a_new2(ins_name_to_read)
@@ -230,7 +229,7 @@ for e in range(epoch):
         # pre_t = pre_t.cpu().squeeze()
         x_pred = torch.round(pre_sols)
 
-        # align the variable name betweend the output and the solver
+        # align the variable name between the output and the solver
         all_varname = []
         for name in v_map:
             all_varname.append(name)
@@ -278,8 +277,7 @@ for e in range(epoch):
 
         # m.optimize()
         # obj = m.objVal
-        obj = 23791.7
-        print("gurobi 最优解：", obj)
+        obj = 23128.7
         m.Params.LogFile = f'{log_folder}/{test_ins_name}.log'
         # fix 0:no fix 1:随机 2:排序 3: 交集
         modify(m, n=0, k=100, fix=0)  # if fix=0  do nothing
@@ -291,10 +289,11 @@ for e in range(epoch):
         m.optimize()
         new_solution = {var.VarName: var.X for var in m.getVars()}
         test.validate_solution_in_original_model(o_m, new_solution)
-        o_m = test.constrain_search(m, o_m, new_solution, BD, tight_constraints, k_0, k_1, kc)
+        o_m = test.enhance_solve(m, o_m, new_solution, BD, tight_constraints, k_0, k_1, kc)
         o_m = test.search(o_m, scores, delta)
         o_m.update()
         o_m.optimize()
+        print("gurobi 最优解：", obj)
         print(f"search 最优值：{o_m.objVal}")
 
         t = time() - t_start

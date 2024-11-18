@@ -4,6 +4,8 @@ import time
 from multiprocessing import Process, Queue
 
 import ecole
+import os
+os.environ["LD_DEBUG"] = "libs"
 
 # prefix = '../../../../project/predict_and_search/'
 prefix = './'
@@ -78,6 +80,6 @@ if __name__ == '__main__':
     mix = False
     if mix:
         for i in range(3):
-            generate_instances(100, "train", "CA", epoch=i)
+            generate_instances(100, "test", "CA", epoch=i)
     else:
         generate_instances(100, "test", "CA", epoch=2)

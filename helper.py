@@ -324,7 +324,7 @@ def get_BG_from_GRB(ins_name):
     return A, v_map, v_nodes, c_nodes, b_vars
 
 
-def get_a_new2(ins_name, couple=0):
+def get_a_new2(ins_name, couple=1):
     epsilon = 1e-6
 
     # vars:  [obj coeff, norm_coeff, degree, Bin?]
@@ -474,6 +474,9 @@ def get_a_new2(ins_name, couple=0):
     maxs = torch.max(c_nodes, 0)[0]
     mins = torch.min(c_nodes, 0)[0]
     diff = maxs - mins
+    # for ks in range(diff.shape[0]):
+    #     if diff[ks] == 0:
+    #         diff[ks] = 1
     c_nodes = c_nodes - mins
     c_nodes = c_nodes / diff
     c_nodes = torch.clamp(c_nodes, 1e-5, 1)

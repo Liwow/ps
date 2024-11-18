@@ -28,7 +28,27 @@ def ss():
             print(f"Source file {src_path} not found.")
 
 
-def constrain_search(m, o_m, new_solution, BD, tight_pred, k0, k1, kc):
+def top_k_importance_sampling(predict, k, m=None):
+    if m is None:
+        m = min(2 * k, predict.size(0))
+
+    _, top_m_indices = torch.topk(predict, m)  # 取前 m 个高概率的约束索引
+    candidate_probs = predict[top_m_indices]  # 获取候选集的概率值
+
+    weights = candidate_probs / candidate_probs.sum()
+
+    selected_indices = torch.multinomial(weights, k, replacement=False)
+    selected_constraints = top_m_indices[selected_indices]
+
+    return selected_constraints.tolist()
+
+
+def constrain_search():
+    # 从topk集合中，采样（如何采样）一个子集，作为
+    pass
+
+
+def enhance_solve(m, o_m, new_solution, BD, tight_pred, k0, k1, kc):
     model_to_filtered_index = map_model_to_filtered_indices(o_m)
     pre_cons, pre_sols = BD
     vars_list = o_m.getVars()

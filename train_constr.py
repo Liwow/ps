@@ -18,7 +18,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # 4 public datasets, IS, WA, CA, IP
 # train model task
-TaskName = "CA_m_ccon2"
+TaskName = "CA_ccon2"
 warnings.filterwarnings("ignore")
 # set folder
 train_task = f'{TaskName}_train'
@@ -42,7 +42,7 @@ NUM_WORKERS = 0
 WEIGHT_NORM = 100
 
 # dataset task
-TaskName = "CA_m"
+TaskName = "CA"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 DIR_BG = f'./dataset/{TaskName}/BG'
 DIR_SOL = f'./dataset/{TaskName}/solution'
@@ -58,8 +58,8 @@ elif multimodal:
     from GCN import GraphDataset
     from GCN import GNNPolicy_multimodal as GNNPolicy
 else:
-    from GCN import GraphDataset_loss as GraphDataset
-    from GCN import GNNPolicy_loss as GNNPolicy
+    from GCN import GraphDataset_constraint as GraphDataset
+    from GCN import GNNPolicy_constraint as GNNPolicy
 
 train_data = GraphDataset(train_files)
 train_loader = torch_geometric.loader.DataLoader(train_data, batch_size=BATCH_SIZE, shuffle=True,
@@ -143,8 +143,8 @@ def train(predict, data_loader, epoch, optimizer=None, weight_norm=1):
                 masks = batch.c_mask[conStartInd:conEndInd].reshape(-1, con_num[i])[0]
                 vals = batch.objVals[valStartInd:valEndInd]
 
-                tights = batch.t_labels[labelStartInd:labelEndInd].reshape(-1, label_num[i])
-                target_tights.append(tights)
+                # tights = batch.t_labels[labelStartInd:labelEndInd].reshape(-1, label_num[i])
+                # target_tights.append(tights)
 
                 target_sols.append(sols)
                 target_labels.append(cons)
@@ -162,15 +162,14 @@ def train(predict, data_loader, epoch, optimizer=None, weight_norm=1):
                 batch.variable_features,
                 mask
             )
-            predict_con, predict_sol, predict_t = BD
+            predict_con, predict_sol = BD
 
             # compute loss
             loss = 0
             index_arrow = 0
             index_cons = 0
             # in batch
-            for ind, (sols, vals, labels, tights) in enumerate(
-                    zip(target_sols, target_vals, target_labels, target_tights)):
+            for ind, (sols, vals, labels) in enumerate(zip(target_sols, target_vals, target_labels)):
                 # compute weight
                 n_vals = vals
                 exp_weight = torch.exp(-n_vals / weight_norm)
@@ -184,28 +183,19 @@ def train(predict, data_loader, epoch, optimizer=None, weight_norm=1):
                 # get binary variables
                 sols = sols[:, varname_map][:, b_vars]
                 pre_cons = predict_con[index_cons: index_cons + label_num[ind]].squeeze()
-                pre_t = predict_t[index_cons: index_cons + label_num[ind]].squeeze()
+                # pre_t = predict_t[index_cons: index_cons + label_num[ind]].squeeze()
                 index_cons = index_cons + label_num[ind]
-                # todo con_loss
+
                 pos_loss = -(pre_cons + 1e-8).log()[None, :] * (labels == 1).float()
                 neg_loss = -(1 - pre_cons + 1e-8).log()[None, :] * (labels == 0).float()
                 masked_con_loss = (pos_loss + neg_loss) * weight[:, None]
-
-                pos_loss = -(pre_t + 1e-8).log()[None, :] * (tights == 1).float()
-                neg_loss = -(1 - pre_t + 1e-8).log()[None, :] * (tights == 0).float()
-                tight_loss = (pos_loss + neg_loss) * weight[:, None]
-                if epoch <= 250:
-                    loss += (3 * tight_loss.sum())
-                else:
-                    loss += (2 * tight_loss.sum() + masked_con_loss.sum())
-
-                # todo penalty
                 # masked_con_loss = utils.focal_loss(pre_cons, labels, weight)
-                # penalty = 300 * torch.where(labels == 0, -torch.log(1 - pre_cons + 1e-8), torch.zeros_like(pre_cons))
-                # if epoch > 200:
-                #     loss += (20 * masked_con_loss + penalty.mean())
-                # else:
-                #     loss += (20 * masked_con_loss)
+
+                # pos_loss = -(pre_t + 1e-8).log()[None, :] * (tights == 1).float()
+                # neg_loss = -(1 - pre_t + 1e-8).log()[None, :] * (tights == 0).float()
+                # tight_loss = (pos_loss + neg_loss) * weight[:, None]
+
+                loss += 3 * (masked_con_loss.sum())
 
                 n_var = batch.ntvars[ind]
                 pre_sols = predict_sol[index_arrow:index_arrow + n_var].squeeze()[b_vars]
