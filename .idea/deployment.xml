@@ -1,7 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
-  <component name="PublishConfigData" autoUpload="Always" serverName="ljj@a534.ink19.cn:22 password (3)" remoteFilesAllowedToDisappearOnAutoupload="false">
+  <component name="PublishConfigData" autoUpload="Always" serverName="ljj@10.201.37.233:22" remoteFilesAllowedToDisappearOnAutoupload="false">
     <serverData>
+      <paths name="ljj@10.201.37.233:22">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/home/ljj/project/predict_and_search" local="$PROJECT_DIR$" />
+          </mappings>
+        </serverdata>
+      </paths>
       <paths name="ljj@a534.ink19.cn:22 password (3)">
         <serverdata>
           <mappings>

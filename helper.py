@@ -324,7 +324,7 @@ def get_BG_from_GRB(ins_name):
     return A, v_map, v_nodes, c_nodes, b_vars
 
 
-def get_a_new2(ins_name, couple=1):
+def get_a_new2(ins_name, couple=0):
     epsilon = 1e-6
 
     # vars:  [obj coeff, norm_coeff, degree, Bin?]
@@ -485,15 +485,21 @@ def get_a_new2(ins_name, couple=1):
 
 
 def map_model_to_filtered_indices(m):
+    # m --->  mask_m (mask "=" con)
+    # m gurobi model
     cons = m.getConstrs()  # 获取模型中的所有约束
 
     # 构建映射：模型的索引 -> 过滤后的索引
     model_to_filtered_index = {}
+    filtered_index_to_model = {}
     filtered_idx = 0  # 记录过滤后的索引
 
     for i, c in enumerate(cons):
         if c.Sense in ['<', '>']:
             model_to_filtered_index[i] = filtered_idx
+            filtered_index_to_model[filtered_idx] = i
             filtered_idx += 1
+        else:
+            continue
 
-    return model_to_filtered_index
+    return model_to_filtered_index, filtered_index_to_model

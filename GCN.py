@@ -163,6 +163,23 @@ class BipartiteGraphConvolution(torch_geometric.nn.MessagePassing):
         return output
 
 
+class SELayerGraph(nn.Module):
+    def __init__(self, feature_dim, reduction=16):
+        super(SELayerGraph, self).__init__()
+        self.fc = nn.Sequential(
+            nn.Linear(feature_dim, feature_dim // reduction, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Linear(feature_dim // reduction, feature_dim, bias=False),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        # x: (batch_size, num_nodes, feature_dim)
+        mean = x.mean(dim=0, keepdim=True)  # 对节点的特征均值化 (batch_size, feature_dim)
+        weights = self.fc(mean)  # 通过全连接网络生成权重
+        return x * weights  # 加权特征
+
+
 class GraphDataset(torch_geometric.data.Dataset):
     """
     This class encodes a collection of graphs, as well as a method to load such graphs from the disk.
@@ -553,7 +570,10 @@ class GNNPolicy_constraint(torch.nn.Module):
         cons_nfeats = 4
         edge_nfeats = 1
         var_nfeats = 6
-
+        self.temperature = 0.6
+        self.dropout = nn.Dropout(p=0.3)
+        self.se_con = SELayerGraph(emb_size)
+        self.se_var = SELayerGraph(emb_size)
         # CONSTRAINT EMBEDDING
         self.cons_embedding = torch.nn.Sequential(
             torch.nn.LayerNorm(cons_nfeats),
@@ -607,8 +627,10 @@ class GNNPolicy_constraint(torch.nn.Module):
 
         # First step: linear embedding layers to a common dimension (64)
         constraint_features = self.cons_embedding(constraint_features)
+        constraint_features = self.se_con(constraint_features)
         edge_features = self.edge_embedding(edge_features)
         variable_features = self.var_embedding(variable_features)
+        variable_features = self.se_var(variable_features)
 
         # Two half convolutions
         variable_features = self.conv_c_to_v(
@@ -617,6 +639,9 @@ class GNNPolicy_constraint(torch.nn.Module):
         constraint_features = self.conv_v_to_c(
             variable_features, reversed_edge_indices, edge_features, constraint_features
         )
+
+        constraint_features = self.dropout(constraint_features)
+        variable_features = self.dropout(variable_features)
 
         variable_features = self.conv_c_to_v2(
             constraint_features, edge_indices, edge_features, variable_features
@@ -634,8 +659,8 @@ class GNNPolicy_constraint(torch.nn.Module):
         else:
             mask_constraint_features = constraint_features
 
-        con_output = torch.sigmoid(self.con_mlp(mask_constraint_features).squeeze(-1))
-        var_output = torch.sigmoid(self.var_mlp(variable_features).squeeze(-1))
+        con_output = torch.sigmoid(self.con_mlp(mask_constraint_features).squeeze(-1) / self.temperature)
+        var_output = torch.sigmoid(self.var_mlp(variable_features).squeeze(-1) / self.temperature)
 
         return con_output, var_output
 
@@ -857,7 +882,7 @@ class GraphDataset_constraint(torch_geometric.data.Dataset):
         sols = np.round(sols, 0)
         return BG, sols, objs, varNames, slacks
 
-    def get_critical(self, path, method="fix", n=15):
+    def get_critical(self, path, method="kmeans", n=15):
         file = os.path.basename(path[0])[:-3]
         task_name = path[0].split('/')[-3]
         instance_path = './instance/train/' + task_name + '/' + file
@@ -898,13 +923,13 @@ class GraphDataset_constraint(torch_geometric.data.Dataset):
 
         # nbp, sols, objs, varInds, varNames = self.process_sample(self.sample_files[index])
         BG, sols, objs, varNames, slacks = self.process_sample(self.sample_files[index])
-        critical_list_by_sparse, var_num_list = self.get_critical(self.sample_files[index], method="fix")
+        critical_list_by_sparse, var_num_list = self.get_critical(self.sample_files[index], method="kmeans")
 
-        A, v_map, v_nodes, c_nodes, b_vars, coupling_degrees = BG
-        sparse_cluster, labels = utils.get_label_by_kmeans(coupling_degrees)
-        critical_list_by_coupling = [1 if label == sparse_cluster else 0 for label in labels]
+        A, v_map, v_nodes, c_nodes, b_vars = BG
+        # sparse_cluster, labels = utils.get_label_by_kmeans(coupling_degrees)
+        # critical_list_by_coupling = [1 if label == sparse_cluster else 0 for label in labels]
 
-        critical_list = critical_list_by_coupling
+        critical_list = critical_list_by_sparse
 
         constraint_features = c_nodes
         edge_indices = A._indices()
@@ -929,7 +954,8 @@ class GraphDataset_constraint(torch_geometric.data.Dataset):
             labels = [1 if con[1] == 0 and con[2] in ['<', '>'] else 0 for con in slack]
             mask = torch.tensor(mask, dtype=torch.float32)
             labels = torch.tensor(labels, dtype=torch.int)
-            labels = torch.bitwise_and(labels[mask == 1], torch.tensor(critical_list, dtype=torch.int))
+            labels = labels[mask == 1]
+            labels = torch.bitwise_and(labels, torch.tensor(critical_list, dtype=torch.int))
             c_mask.append(mask)
             c_labels.append(labels.float())
         graph.c_labels = torch.cat(c_labels).reshape(-1)
@@ -1032,11 +1058,11 @@ class GraphDataset_loss(torch_geometric.data.Dataset):
         BG, sols, objs, varNames, slacks = self.process_sample(self.sample_files[index])
         critical_list_by_sparse, var_num_list = self.get_critical(self.sample_files[index], method="fix")
 
-        A, v_map, v_nodes, c_nodes, b_vars, coupling_degrees = BG
-        sparse_cluster, labels = utils.get_label_by_kmeans(coupling_degrees)
-        critical_list_by_coupling = [1 if label == sparse_cluster else 0 for label in labels]
+        A, v_map, v_nodes, c_nodes, b_vars = BG
+        # sparse_cluster, labels = utils.get_label_by_kmeans(coupling_degrees)
+        # critical_list_by_coupling = [1 if label == sparse_cluster else 0 for label in labels]
 
-        critical_list = critical_list_by_coupling
+        critical_list = critical_list_by_sparse
 
         constraint_features = c_nodes
         edge_indices = A._indices()
@@ -1111,3 +1137,19 @@ def postion_get(variable_features):
     variable_features = torch.FloatTensor(variable_features.cpu())
     v = torch.concat([variable_features, position_feature], dim=1).to(DEVICE)
     return v
+
+
+def Loss_CV(mip, sol_per, con_per):
+    lamda = 1
+    sol = sol_per
+    A, b, _ = mip.getCoff()
+
+    result = torch.sparse.mm(A, sol.unsqueeze(1))
+    Ax_minus_b = result.squeeze(1) - b
+
+    tight_constraints_loss = torch.mul(con_per[con_per > 0.8], torch.pow(Ax_minus_b, 2))
+    tight_loss = tight_constraints_loss.sum()
+
+    loss = lamda * tight_loss
+
+    return loss

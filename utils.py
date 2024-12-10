@@ -2,11 +2,13 @@ import random
 import re
 import numpy as np
 from sklearn.cluster import KMeans
+import torch
+from torch.nn import DataParallel
 
 
 def split_sample_by_blocks(sample_files, train_rate, block_size):
     sample_files = sorted(sample_files, key=lambda x: int(re.search(r'\d+', str(x)).group()))
-    sample_files = sample_files[-100:]
+    sample_files = sample_files[:]
     random.seed(0)
     train_files = []
     valid_files = []
@@ -94,3 +96,22 @@ def normalize_to_range(data, new_min=0, new_max=2):
         for x in data
     ]
     return normalized_data
+
+
+class GNNPolicyWithCustomForward(torch.nn.Module):
+    def __init__(self, model):
+        super().__init__()
+        self.model = model
+
+    def forward(self, constraint_features, edge_indices, edge_features, variable_features, c_masks):
+        # 将全局静态数据广播到所有设备
+        edge_indices_broadcasted = [edge_indices.to(f"cuda:{i}") for i in range(torch.cuda.device_count())]
+
+        # 将其他输入正常分发
+        return self.model(
+            constraint_features,
+            edge_indices_broadcasted,
+            edge_features,
+            variable_features,
+            c_masks
+        )

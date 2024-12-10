@@ -18,7 +18,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # 4 public datasets, IS, WA, CA, IP
 # train model task
-TaskName = "CA_ccon2"
+TaskName = "case118"
 warnings.filterwarnings("ignore")
 # set folder
 train_task = f'{TaskName}_train'
@@ -36,19 +36,19 @@ log_file = open(f'{log_save_path}{train_task}_train.log', 'wb')
 
 # set params
 LEARNING_RATE = 0.001
-NB_EPOCHS = 9999
+NB_EPOCHS = 200
 BATCH_SIZE = 4
 NUM_WORKERS = 0
 WEIGHT_NORM = 100
 
 # dataset task
-TaskName = "CA"
+TaskName = "case118"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 DIR_BG = f'./dataset/{TaskName}/BG'
 DIR_SOL = f'./dataset/{TaskName}/solution'
 sample_names = os.listdir(DIR_BG)
 sample_files = [(os.path.join(DIR_BG, name), os.path.join(DIR_SOL, name).replace('bg', 'sol')) for name in sample_names]
-train_files, valid_files = utils.split_sample_by_blocks(sample_files, 0.9, block_size=100)
+train_files, valid_files = utils.split_sample_by_blocks(sample_files, 0.9, block_size=30)
 multimodal = False
 if TaskName == "IP":
     # Add position embedding for IP model, due to the strong symmetry
@@ -72,7 +72,7 @@ PredictModel = GNNPolicy(TaskName).to(DEVICE)
 
 
 def lr_lambda(epoch):
-    return 0.95 ** ((epoch + 1) // 20)
+    return 0.99 ** ((epoch + 1) // 5)
 
 
 def EnergyWeightNorm(task):
@@ -94,6 +94,8 @@ def EnergyWeightNorm(task):
         return 10000
     elif task == "markshare":
         return 10
+    elif task == "case118":
+        return 1e7
 
 
 def train(predict, data_loader, epoch, optimizer=None, weight_norm=1):
@@ -112,7 +114,7 @@ def train(predict, data_loader, epoch, optimizer=None, weight_norm=1):
     with torch.set_grad_enabled(optimizer is not None):
         for step, batch in enumerate(tqdm(data_loader, desc=f"{desc}Epoch {epoch}")):
             batch = batch.to(DEVICE)
-            accumulation_steps = 16
+            accumulation_steps = 4
             # get target solutions in list format
             solInd = batch.nsols
             con_num = batch.ncons
@@ -166,6 +168,7 @@ def train(predict, data_loader, epoch, optimizer=None, weight_norm=1):
 
             # compute loss
             loss = 0
+            record_loss = 0
             index_arrow = 0
             index_cons = 0
             # in batch
@@ -194,8 +197,13 @@ def train(predict, data_loader, epoch, optimizer=None, weight_norm=1):
                 # pos_loss = -(pre_t + 1e-8).log()[None, :] * (tights == 1).float()
                 # neg_loss = -(1 - pre_t + 1e-8).log()[None, :] * (tights == 0).float()
                 # tight_loss = (pos_loss + neg_loss) * weight[:, None]
-
-                loss += 3 * (masked_con_loss.sum())
+                # todo 一致性损失，问题1：约束多，全部计算效率低; 问题2：只知道二元变量
+                # todo con还能带来什么信息？
+                # todo 什么样的con能加速  B&B
+                # todo 拉格朗日
+                con_loss_sg = masked_con_loss.sum().detach()
+                loss += (masked_con_loss.sum() / con_loss_sg)
+                record_loss += con_loss_sg
 
                 n_var = batch.ntvars[ind]
                 pre_sols = predict_sol[index_arrow:index_arrow + n_var].squeeze()[b_vars]
@@ -204,7 +212,9 @@ def train(predict, data_loader, epoch, optimizer=None, weight_norm=1):
                 neg_loss = -(1 - pre_sols + 1e-8).log()[None, :] * (sols == 0).float()
                 sum_loss = pos_loss + neg_loss
                 sample_sols_loss = sum_loss * weight[:, None]
-                loss += sample_sols_loss.sum()
+                sols_loss_sg = sample_sols_loss.sum().detach()
+                loss += (sample_sols_loss.sum() / sols_loss_sg)
+                record_loss += sols_loss_sg
             if optimizer is not None:
                 loss.backward()
             if optimizer is not None and (step + 1) % accumulation_steps == 0:
@@ -213,14 +223,14 @@ def train(predict, data_loader, epoch, optimizer=None, weight_norm=1):
             if optimizer is not None and step == len(data_loader) - 1:
                 optimizer.step()
                 optimizer.zero_grad()
-            mean_loss += loss.item()
+            mean_loss += record_loss.item()
             n_samples_processed += batch.num_graphs
     mean_loss /= n_samples_processed
 
     return mean_loss
 
 
-optimizer = torch.optim.Adam(PredictModel.parameters(), lr=LEARNING_RATE)
+optimizer = torch.optim.Adam(PredictModel.parameters(), lr=LEARNING_RATE, weight_decay=1e-4)
 scheduler = LambdaLR(optimizer, lr_lambda)
 weight_norm = EnergyWeightNorm(TaskName) if not None else 100
 best_val_loss = 99999

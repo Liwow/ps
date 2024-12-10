@@ -86,13 +86,13 @@ def collect(ins_dir, q, sol_dir, log_dir, bg_dir, settings):
         # get bipartite graph , binary variables' indices
         bg_file = os.path.join(bg_dir, filename + '.bg')
         if not os.path.isfile(bg_file):
-            A2, v_map2, v_nodes2, c_nodes2, b_vars2, coupling_degrees = get_a_new2(filepath, couple=1)
-            BG_data = [A2, v_map2, v_nodes2, c_nodes2, b_vars2, coupling_degrees]
+            A2, v_map2, v_nodes2, c_nodes2, b_vars2, _ = get_a_new2(filepath, couple=0)
+            BG_data = [A2, v_map2, v_nodes2, c_nodes2, b_vars2]
             pickle.dump(BG_data, open(os.path.join(bg_dir, filename + '.bg'), 'wb'))
 
 
 if __name__ == '__main__':
-    sizes = ["CA"]
+    sizes = ["case118"]
     # sizes=["IP","WA","IS","CA","NNV"]
 
     parser = argparse.ArgumentParser()
