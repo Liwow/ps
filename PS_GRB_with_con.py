@@ -14,6 +14,7 @@ from time import time
 from helper import get_a_new2
 import logging
 
+
 def modify(model, n=0, k=0, fix=0):
     # fix 0:no fix 1:随机 2:排序 3: 交集
     if model.Status not in [GRB.OPTIMAL, GRB.TIME_LIMIT]:
@@ -232,7 +233,7 @@ for e in range(epoch):
         test_ins_name = sample_names[e * TestNum + ins_num + 12]
         ins_name_to_read = f'./instance/test/{TaskName}/{test_ins_name}'
         # get bipartite graph as input
-        A, v_map, v_nodes, c_nodes, b_vars, _ = get_a_new2(ins_name_to_read)
+        A, v_map, v_nodes, c_nodes, b_vars = get_a_new2(ins_name_to_read)
         constraint_features = c_nodes.cpu()
         constraint_features[torch.isnan(constraint_features)] = 1  # remove nan value
         variable_features = v_nodes

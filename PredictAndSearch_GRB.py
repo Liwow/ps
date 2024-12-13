@@ -2,7 +2,7 @@ import gurobipy
 import json
 from gurobipy import GRB
 import argparse
-
+import utils
 import helper
 import test
 from test import validate_solution_in_original_model, change_model
@@ -11,50 +11,49 @@ import os
 import numpy as np
 import torch
 from time import time
-from helper import get_a_new2
+from helper import get_a_new2, get_bigraph, get_pattern
 
-
-def modify(model, n=0, k=0, fix=0):
-    # fix 0:no fix 1:随机 2:排序 3: 交集
-    if model.Status not in [GRB.OPTIMAL, GRB.TIME_LIMIT]:
-        print("No optimal solution found.")
-        return
-    slacks = {constr: constr.slack for constr in model.getConstrs() if constr.Sense in ['<', '>']}
-    filter_indices = [
-        model_to_filtered_index[i] for i in tc_1 if i in model_to_filtered_index
-    ]
-    most_tight_constraints, count_tight = test.get_most_tight_constraints(slacks, filter_indices)
-    print(f"最优解和预测投影解中松弛度都为 0 的相同约束个数: {count_tight}")
-    if fix == 0:
-        print("****** do nothing! *********")
-        return
-    sorted_slacks = sorted(slacks.items(), key=lambda item: abs(item[1]), reverse=True)
-    if n != 0:
-        most_relaxed_constraints = [constr for constr, slack in sorted_slacks[:n]]
-        print(f"Removing {n} most relaxed constraints.")
-        for constr in most_relaxed_constraints:
-            m.remove(constr)
-
-    tight_constraints = [constr for constr, slack in slacks.items() if slack == 0]
-
-    if fix == 1:
-        print("groundtruth 固定约束,固定方式:随机")
-        random.shuffle(tight_constraints)
-        most_tight_constraints = tight_constraints[:k]
-    elif fix == 2:
-        print("groundtruth 固定约束,固定方式:排序")
-        most_tight_constraints = [constr for constr, slack in sorted_slacks[-k:]] if k > 0 else []
-    elif fix == 3:
-        print("groundtruth 固定约束,固定方式:交集")
-    for constr in most_tight_constraints:
-        row = model.getRow(constr)
-        coeffs = []
-        vars = []
-        for i in range(row.size()):
-            coeffs.append(row.getCoeff(i))
-            vars.append(row.getVar(i))
-        model.remove(constr)
-        model.addConstr(gurobipy.LinExpr(coeffs, vars) == constr.RHS, name=f"{constr.ConstrName}_tight")
+# def modify(model, n=0, k=0, fix=0):
+#     # fix 0:no fix 1:随机 2:排序 3: 交集
+#     if model.Status not in [GRB.OPTIMAL, GRB.TIME_LIMIT]:
+#         print("No optimal solution found.")
+#         return
+#     slacks = {constr: constr.slack for constr in model.getConstrs() if constr.Sense in ['<', '>']}
+#     filter_indices = [
+#         model_to_filtered_index[i] for i in tc_1 if i in model_to_filtered_index
+#     ]
+#     most_tight_constraints, count_tight = test.get_most_tight_constraints(slacks, filter_indices)
+#     print(f"最优解和预测投影解中松弛度都为 0 的相同约束个数: {count_tight}")
+#     if fix == 0:
+#         print("****** do nothing! *********")
+#         return
+#     sorted_slacks = sorted(slacks.items(), key=lambda item: abs(item[1]), reverse=True)
+#     if n != 0:
+#         most_relaxed_constraints = [constr for constr, slack in sorted_slacks[:n]]
+#         print(f"Removing {n} most relaxed constraints.")
+#         for constr in most_relaxed_constraints:
+#             m.remove(constr)
+#
+#     tight_constraints = [constr for constr, slack in slacks.items() if slack == 0]
+#
+#     if fix == 1:
+#         print("groundtruth 固定约束,固定方式:随机")
+#         random.shuffle(tight_constraints)
+#         most_tight_constraints = tight_constraints[:k]
+#     elif fix == 2:
+#         print("groundtruth 固定约束,固定方式:排序")
+#         most_tight_constraints = [constr for constr, slack in sorted_slacks[-k:]] if k > 0 else []
+#     elif fix == 3:
+#         print("groundtruth 固定约束,固定方式:交集")
+#     for constr in most_tight_constraints:
+#         row = model.getRow(constr)
+#         coeffs = []
+#         vars = []
+#         for i in range(row.size()):
+#             coeffs.append(row.getCoeff(i))
+#             vars.append(row.getVar(i))
+#         model.remove(constr)
+#         model.addConstr(gurobipy.LinExpr(coeffs, vars) == constr.RHS, name=f"{constr.ConstrName}_tight")
 
 
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -62,7 +61,7 @@ random.seed(0)
 torch.manual_seed(0)
 torch.cuda.manual_seed(0)
 multimodal = False
-TaskName = "WA"
+TaskName = "CA___"
 if TaskName == "CA_multi":
     multimodal = True
 # load pretrained model
@@ -72,7 +71,8 @@ if TaskName == "IP":
 elif multimodal:
     from GCN import GNNPolicy_multimodal as GNNPolicy
 else:
-    from GCN import GNNPolicy
+    # from GCN import GNNPolicy as GNNPolicy
+    from GCN_class import GNNPolicy_class as GNNPolicy
 
 model_name = f'{TaskName}.pth'
 pathstr = f'./models/{model_name}'
@@ -81,7 +81,7 @@ state = torch.load(pathstr, map_location=torch.device('cuda:0'))
 policy.load_state_dict(state)
 
 # 4 public datasets, IS, WA, CA, IP
-TaskName = 'WA'
+TaskName = 'CA'
 
 
 def test_hyperparam(task):
@@ -96,7 +96,7 @@ def test_hyperparam(task):
     elif task == "WA":
         return 0, 500, 10
     elif task == "CA" or task == "CA_m":  # 600 0 1
-        return 600, 0, 10
+        return 600, 0, 1
     elif task == "beasley":
         return 50, 17, 10
     elif task == "ns":
@@ -132,6 +132,7 @@ time_total = 0
 max_subop = -1
 max_infeas = -1
 max_time = 0
+gap_total = 0
 
 ALL_Test = 100
 epoch = 3
@@ -143,9 +144,11 @@ for e in range(epoch):
         test_ins_name = sample_names[(0 + e) * TestNum + ins_num]
         ins_name_to_read = f'./instance/test/{TaskName}/{test_ins_name}'
         # get bipartite graph as input
-        A, v_map, v_nodes, c_nodes, b_vars, _ = get_a_new2(ins_name_to_read)
+        v_class_name, c_class_name = get_pattern("./task_config.json", TaskName)
+        A, v_map, v_nodes, c_nodes, b_vars, v_class, c_class, _ = get_bigraph(ins_name_to_read, v_class_name, c_class_name)
+        # A, v_map, v_nodes, c_nodes, b_vars = get_a_new2(ins_name_to_read)
         constraint_features = c_nodes.cpu()
-        constraint_features[np.isnan(constraint_features)] = 1  # remove nan value
+        constraint_features[torch.isnan(constraint_features)] = 1  # remove nan value
         variable_features = v_nodes
         if TaskName == "IP":
             variable_features = postion_get(variable_features)
@@ -153,13 +156,18 @@ for e in range(epoch):
         edge_features = A._values().unsqueeze(1)
         edge_features = torch.ones(edge_features.shape)
 
+        v_class = utils.convert_class_to_labels(v_class, variable_features.shape[0])
+        c_class = utils.convert_class_to_labels(c_class, constraint_features.shape[0])
+
         # prediction
         BD = policy(
             constraint_features.to(DEVICE),
             edge_indices.to(DEVICE),
             edge_features.to(DEVICE),
             variable_features.to(DEVICE),
-        ).sigmoid().cpu().squeeze()
+            torch.LongTensor(v_class).to(DEVICE),
+            torch.LongTensor(c_class).to(DEVICE),
+        ).cpu().squeeze()
         x_pred = (BD > 0.5).float()
 
         # align the variable name betweend the output and the solver
@@ -202,18 +210,20 @@ for e in range(epoch):
         m = gurobipy.read(ins_name_to_read)
         model_to_filtered_index = helper.map_model_to_filtered_indices(m)
         # 修复预测初始解，得到初始可行解
-        _, tc_1 = test.project_to_feasible_region_and_get_tight_constraints(m, x_pred)
-        o_m = m.copy()
+        # _, tc_1 = test.project_to_feasible_region_and_get_tight_constraints(m, x_pred)
+
         m.Params.TimeLimit = 1000
         m.Params.Threads = 32
+        m.Params.LogFile = f'{log_folder}/{test_ins_name}.log'
         gurobipy.setParam('LogToConsole', 1)
 
-        m.optimize()
-        obj = m.objVal
-        # obj = 23791.7
+        # m.optimize()
+        # obj = m.objVal
+        obj = 23791.7
         print("gurobi 最优解：", obj)
-        m.Params.LogFile = f'{log_folder}/{test_ins_name}.log'
-        modify(m, n=0, k=1000, fix=1)  # if fix=0  do nothing
+        m.reset()
+        m.Params.TimeLimit = 1000
+        m.Params.Threads = 8
 
         # trust region method implemented by adding constraints
         instance_variabels = m.getVars()
@@ -239,26 +249,31 @@ for e in range(epoch):
         m.update()
         m.optimize()
 
-        new_solution = {var.VarName: var.X for var in m.getVars()}
-        validate_solution_in_original_model(o_m, new_solution)
+        # new_solution = {var.VarName: var.X for var in m.getVars()}
+        # validate_solution_in_original_model(o_m, new_solution)
 
         t = time() - t_start
         time_total += t
+        pre_obj = m.objVal
         if max_time <= t:
             max_time = t
         if m.status == GRB.OPTIMAL:
-            pre_obj = m.objVal
             subop = abs(pre_obj - obj) / abs(obj)
             subop_total += subop
             if subop > max_subop:
                 max_subop = subop
             if subop < 1e-4:
                 count += 1
-            print(f"ps 最优值：{m.objVal}; subopt: {round(subop, 6)}")
+            print(f"ps 最优值：{pre_obj}; subopt: {round(subop, 4)}")
+        if m.status == GRB.TIME_LIMIT:
+            mip_gap = m.MIPGap
+            gap_total += mip_gap
+            print(f"ps 最优值：{pre_obj}; gap: {round(mip_gap, 4)}")
         else:
             print("不可行")
 
 total_num = TestNum * epoch
+mean_gap = gap_total / TestNum / epoch
 results = {
     "acc": count / total_num,
     "avg_subopt": round(subop_total / total_num, 6),

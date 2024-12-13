@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import gurobipy as gp
@@ -117,13 +118,10 @@ def project_to_feasible_region_and_get_tight_constraints(model, x_pred):
     """
     使用Gurobi将预测变量x_pred投影到可行域，并返回可行解和紧约束集。
     """
-    # 创建新的Gurobi模型
     proj_model = gp.Model("projection")
 
-    # 设置参数以静默运行
     proj_model.setParam('OutputFlag', 0)
 
-    # 从原模型复制变量，并构建映射：添加新的决策变量
     x = proj_model.addVars(len(x_pred), lb=0, ub=1, vtype=GRB.BINARY, name="x")
 
     # 添加约束：从原模型复制所有约束
@@ -305,6 +303,62 @@ def search(m, scores, delta):
     return m
 
 
+def get_by_semantics(task, tokenizer, text_encoder):
+    # get var_fea, con_fea, edge, edge_feature
+    var_fea = []
+    con_fea = []
+    edge = []
+    edge_feature = []
+    config_path = './task_config.json'
+    with open(config_path, 'r') as f:
+        config_json = json.load(f)
+    if "task" not in config_json or task not in config_json["task"]:
+        raise ValueError(f"Task '{task}' not found in the JSON configuration.")
+    task_details = config_json["task"][task]
+    task_description = task_details.get("task_description", "No description available")
+    task_text = f"task: {task}\ntask_description: {task_description}\n\n"
+    var_text = []
+    con_text = []
+    if "var_type" in task_details:
+        for var_name, var_details in task_details["var_type"].items():
+            var_description = var_details.get("description", "No description available")
+            var_type = var_details.get("type", "No type specified")
+            var_index = var_details.get("index", "No index specified")
+            var_range = var_details.get("range", "No range specified")
+            var_constraints = var_details.get("constraints", "No constraints specified")
+
+            var_text.append(
+                task_text + f"variable_name: {var_name}, variable_index: {var_index}, variable_type: {var_type}, variable_description: {var_description}, variable_range: {var_range}, variable_constraints: {var_constraints}\n\n")
+    if "con_type" in task_details:
+        for con_name, con_details in task_details["con_type"].items():
+            con_description = con_details.get("description", "No description available")
+            con_type = con_details.get("type", "No type specified")
+            con_index = con_details.get("index", "No index specified")
+            con_expression = con_details.get("expression", "No expression specified")
+            con_constraints = con_details.get("constraints", "No constraints specified")
+
+            con_text.append(
+                task_text + f"constraint_name: {con_name}, constraint_index: {con_index}, constraint_type: {con_type}, constraint_description: {con_description}, constraint_expression: {con_expression}, constraint_constraints: {con_constraints}\n\n")
+
+    var_n = len(var_text)
+
+
 if __name__ == "__main__":
-    file = "./instance/test/CA_m/CA_m_69.lp"
-    main(file, n=0, m=30)
+    # file = "./instance/test/CA_m/CA_m_69.lp"
+    # main(file, n=0, m=30)
+    # get_by_semantics("CA", None, None)
+    from transformers import T5Tokenizer, T5ForConditionalGeneration
+
+    # 模型和分词器名称
+    model_name = "t5-base"
+    save_directory = "../../../local_models/t5_base"  # 本地保存路径
+
+    # 加载模型和分词器
+    model = T5ForConditionalGeneration.from_pretrained(model_name)
+    tokenizer = T5Tokenizer.from_pretrained(model_name)
+
+    # 保存到本地
+    model.save_pretrained(save_directory)
+    tokenizer.save_pretrained(save_directory)
+
+    print(f"T5-base model and tokenizer saved to {save_directory}")

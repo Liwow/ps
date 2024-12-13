@@ -5,13 +5,17 @@ from multiprocessing import Process, Queue
 
 import ecole
 import os
+
 os.environ["LD_DEBUG"] = "libs"
 
 # prefix = '../../../../project/predict_and_search/'
 prefix = './'
+
+
 # prefix  = ''
 
-def generate_single_instance(n, queue, istrain, size, generator):
+def generate_single_instance(n, queue, istrain, size, generator, seed):
+    generator.seed(seed)
     while True:
         i = queue.get()
         if i is None:
@@ -43,9 +47,8 @@ def generate_instances(num_instances, istrain, size, epoch=0):
         generator = ecole.instance.SetCoverGenerator(1000, 2000)
     else:
         raise ValueError("Invalid type")
-    # seed = random.randint(0, 2 ** 16 - 1)
-    seed = int(time.time())
-    generator.seed(seed)
+    base_seed = random.randint(0, 2 ** 16 - 1)
+    # seed = int(time.time())
     observation_function = ecole.observation.MilpBipartite()
 
     # Create a queue to hold tasks
@@ -61,9 +64,10 @@ def generate_instances(num_instances, istrain, size, epoch=0):
 
     # Create worker processes
     workers = []
-    for _ in range(num_workers):
+    for worker_id in range(num_workers):
+        seed = base_seed + worker_id
         worker = Process(target=generate_single_instance,
-                         args=(n, task_queue, istrain, size, generator))
+                         args=(n, task_queue, istrain, size, generator, seed))
         workers.append(worker)
         worker.start()
 
@@ -82,4 +86,4 @@ if __name__ == '__main__':
         for i in range(3):
             generate_instances(100, "test", "CA", epoch=i)
     else:
-        generate_instances(100, "test", "CA", epoch=2)
+        generate_instances(300, "train", "CA", epoch=2)

@@ -2,8 +2,8 @@
 <project version="4">
   <component name="WebServers">
     <option name="servers">
-      <webServer id="0ff2edc1-f7c0-4378-9d42-b4aaf5a8c603" name="ljj@a534.ink19.cn:22 password (3)">
-        <fileTransfer accessType="SFTP" host="a534.ink19.cn" port="22" sshConfigId="e9ec5d97-df49-4da5-a8c6-5aa3f7b5d5ea" sshConfig="ljj@a534.ink19.cn:22 password" />
+      <webServer id="0ff2edc1-f7c0-4378-9d42-b4aaf5a8c603" name="ps_a534">
+        <fileTransfer accessType="SFTP" host="a534.ink19.cn" port="22" sshConfigId="888bfd8f-c416-4efa-b681-0fa780015689" sshConfig="ljj@a534.ink19.cn:22 password" />
       </webServer>
     </option>
   </component>

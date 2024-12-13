@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import sys
@@ -324,7 +325,7 @@ def get_BG_from_GRB(ins_name):
     return A, v_map, v_nodes, c_nodes, b_vars
 
 
-def get_a_new2(ins_name, couple=0):
+def get_a_new2(ins_name):
     epsilon = 1e-6
 
     # vars:  [obj coeff, norm_coeff, degree, Bin?]
@@ -386,7 +387,6 @@ def get_a_new2(ins_name, couple=0):
     obj_node[0] /= obj_node[1]
     # quit()
 
-    coupling_degrees = [0] * ncons
     cons_vars = []
     for cind, c in enumerate(cons):
         coeff = m.getValsLinear(c)
@@ -404,17 +404,6 @@ def get_a_new2(ins_name, couple=0):
     # cons_name_map = [c.name for c in cons]
 
     # **计算每个约束的耦合度**
-    if couple != 0:
-        for i, c in enumerate(cons):
-            rhs = m.getRhs(c)
-            lhs = m.getLhs(c)
-            if rhs != lhs:
-                for j in range(i + 1, ncons):
-                    # 计算约束 i 和 j 共享的变量数量
-                    shared_vars = cons_vars[i].intersection(cons_vars[j])
-                    # 更新耦合度
-                    coupling_degrees[i] += len(shared_vars)
-                    coupling_degrees[j] += len(shared_vars)
 
     lcons = ncons
     c_nodes = []
@@ -481,7 +470,187 @@ def get_a_new2(ins_name, couple=0):
     c_nodes = c_nodes / diff
     c_nodes = torch.clamp(c_nodes, 1e-5, 1)
 
-    return A, v_map, v_nodes, c_nodes, b_vars, coupling_degrees
+    return A, v_map, v_nodes, c_nodes, b_vars
+
+
+def get_bigraph(ins_name, v_class_name=None, c_class_name=None, couple=0):
+    epsilon = 1e-6
+
+    # vars:  [obj coeff, norm_coeff, degree, Bin?]
+    m = Model('model')
+    m.hideOutput(True)
+    m.readProblem(ins_name)
+
+    ncons = m.getNConss()
+    nvars = m.getNVars()
+    cons = m.getConss()
+
+    new_cons = []
+    mvars = m.getVars()
+    mvars.sort(key=lambda v: v.name)
+
+    v_nodes = []
+    b_vars = []
+
+    ori_start = 6
+    emb_num = 15
+
+    v_map = {}
+    v_class = [[] for _ in range(len(v_class_name))]
+    c_class = [[] for _ in range(len(c_class_name))]  # c_class_name include obj_node
+
+    for indx, v in enumerate(mvars):
+        tp = [0] * ori_start
+        tp[3] = 0
+        tp[4] = 1e+20
+
+        if v.vtype() == 'BINARY' or v.vtype() == 'INTEGER':
+            tp[ori_start - 1] = 1
+            b_vars.append(indx)
+
+        # Assign variable to v_class based on prefix
+        for i, prefix in enumerate(v_class_name):
+            if v.name.startswith(prefix):
+                v_class[i].append(indx)
+                break
+
+        v_nodes.append(tp)
+        v_map[v.name] = indx
+
+    obj = m.getObjective()
+    obj_cons = [0] * (nvars + 2)
+    indices_spr = [[], []]
+    values_spr = []
+    obj_node = [0, 0, 0, 0]
+
+    for e in obj:
+        vnm = e.vartuple[0].name
+        v = obj[e]
+        v_indx = v_map[vnm]
+        obj_cons[v_indx] = v
+
+        if v != 0:
+            indices_spr[0].append(ncons)
+            indices_spr[1].append(v_indx)
+            values_spr.append(1)
+
+        v_nodes[v_indx][0] = v
+        obj_node[0] += v
+        obj_node[1] += 1
+
+    obj_node[0] /= obj_node[1]
+
+    coupling_degrees = [0] * ncons
+    cons_vars = []
+
+    for cind, c in enumerate(cons):
+        coeff = m.getValsLinear(c)
+        cons_vars.append(set(coeff.keys()))
+
+        if len(coeff) == 0:
+            continue
+
+    if couple != 0:
+        for i, c in enumerate(cons):
+            rhs = m.getRhs(c)
+            lhs = m.getLhs(c)
+            if rhs != lhs:
+                for j in range(i + 1, ncons):
+                    shared_vars = cons_vars[i].intersection(cons_vars[j])
+                    coupling_degrees[i] += len(shared_vars)
+                    coupling_degrees[j] += len(shared_vars)
+
+    lcons = ncons
+    c_nodes = []
+    for cind, c in enumerate(cons):
+        coeff = m.getValsLinear(c)
+        rhs = m.getRhs(c)
+        lhs = m.getLhs(c)
+        sense = 0
+
+        if rhs == lhs:
+            sense = 2
+        elif rhs >= 1e+20:
+            sense = 1
+            rhs = lhs
+
+        summation = 0
+        for k in coeff:
+            v_indx = v_map[k]
+            if coeff[k] != 0:
+                indices_spr[0].append(cind)
+                indices_spr[1].append(v_indx)
+                values_spr.append(1)
+            v_nodes[v_indx][2] += 1
+            v_nodes[v_indx][1] += coeff[k] / lcons
+            v_nodes[v_indx][3] = max(v_nodes[v_indx][3], coeff[k])
+            v_nodes[v_indx][4] = min(v_nodes[v_indx][4], coeff[k])
+            summation += coeff[k]
+        llc = max(len(coeff), 1)
+        c_nodes.append([summation / llc, llc, rhs, sense])
+        # Assign constraint to c_class based on prefix
+        for i, prefix in enumerate(c_class_name):
+            if c.name.startswith(prefix):
+                c_class[i].append(cind)
+                break
+
+    c_nodes.append(obj_node)
+    c_class[-1].append(len(c_nodes) - 1)
+    v_nodes = torch.as_tensor(v_nodes, dtype=torch.float32).to(device)
+    c_nodes = torch.as_tensor(c_nodes, dtype=torch.float32).to(device)
+    b_vars = torch.as_tensor(b_vars, dtype=torch.int32).to(device)
+
+    A = torch.sparse_coo_tensor(indices_spr, values_spr, (ncons + 1, nvars)).to(device)
+
+    clip_max = [20000, 1, torch.max(v_nodes, 0)[0][2].item()]
+    clip_min = [0, -1, 0]
+
+    v_nodes[:, 0] = torch.clamp(v_nodes[:, 0], clip_min[0], clip_max[0])
+
+    maxs = torch.max(v_nodes, 0)[0]
+    mins = torch.min(v_nodes, 0)[0]
+    diff = maxs - mins
+    for ks in range(diff.shape[0]):
+        if diff[ks] == 0:
+            diff[ks] = 1
+    v_nodes = v_nodes - mins
+    v_nodes = v_nodes / diff
+    v_nodes = torch.clamp(v_nodes, 1e-5, 1)
+
+    maxs = torch.max(c_nodes, 0)[0]
+    mins = torch.min(c_nodes, 0)[0]
+    diff = maxs - mins
+    c_nodes = c_nodes - mins
+    c_nodes = c_nodes / diff
+    c_nodes = torch.clamp(c_nodes, 1e-5, 1)
+
+    return A, v_map, v_nodes, c_nodes, b_vars, v_class, c_class, coupling_degrees
+
+
+def get_pattern(json_path, task):
+    # Load the JSON file
+    with open(json_path, 'r') as f:
+        data = json.load(f)
+
+    # Check if task exists in the JSON
+    if "task" not in data or task not in data["task"]:
+        raise ValueError(f"Task '{task}' not found in the JSON file.")
+
+    task_data = data["task"][task]
+
+    # Extract variable type names
+    v_class_name = []
+    if "variable_type" in task_data:
+        for var_name in task_data["variable_type"].keys():
+            v_class_name.append(var_name)
+
+    # Extract constraint type names
+    c_class_name = []
+    if "constraint_type" in task_data:
+        for con_name in task_data["constraint_type"].keys():
+            c_class_name.append(con_name)
+
+    return v_class_name, c_class_name
 
 
 def map_model_to_filtered_indices(m):

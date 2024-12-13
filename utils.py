@@ -98,20 +98,9 @@ def normalize_to_range(data, new_min=0, new_max=2):
     return normalized_data
 
 
-class GNNPolicyWithCustomForward(torch.nn.Module):
-    def __init__(self, model):
-        super().__init__()
-        self.model = model
-
-    def forward(self, constraint_features, edge_indices, edge_features, variable_features, c_masks):
-        # 将全局静态数据广播到所有设备
-        edge_indices_broadcasted = [edge_indices.to(f"cuda:{i}") for i in range(torch.cuda.device_count())]
-
-        # 将其他输入正常分发
-        return self.model(
-            constraint_features,
-            edge_indices_broadcasted,
-            edge_features,
-            variable_features,
-            c_masks
-        )
+def convert_class_to_labels(class_, n):
+    labels = [-1] * n  # 初始化所有约束类别为 -1（无类别）
+    for class_idx, indices in enumerate(class_):
+        for idx in indices:
+            labels[idx] = class_idx  # 设置对应索引的类别
+    return labels

@@ -1,11 +1,10 @@
+import json
 import os
-
 from sklearn.cluster import KMeans
 from transformers import T5Tokenizer, T5EncoderModel
 import torch
 import torch.nn as nn
 import torch_geometric
-import gzip
 import pickle
 import numpy as np
 import time
@@ -115,6 +114,8 @@ class BipartiteNodeData(torch_geometric.data.Data):
             edge_indices,
             edge_features,
             variable_features,
+            v_class,
+            c_class,
 
     ):
         super().__init__()
@@ -122,6 +123,8 @@ class BipartiteNodeData(torch_geometric.data.Data):
         self.edge_index = edge_indices
         self.edge_attr = edge_features
         self.variable_features = variable_features
+        self.v_class = v_class
+        self.c_class = c_class
 
     def __inc__(self, key, value, store, *args, **kwargs):
         """
@@ -134,12 +137,16 @@ class BipartiteNodeData(torch_geometric.data.Data):
             )
         elif key == "candidates":
             return self.variable_features.size(0)
+        # elif key == "v_class":
+        #     return [self.variable_features.size(0)] * len(self.v_class)
+        # elif key == "c_class":
+        #     return [self.constraint_features.size(0)] * len(self.c_class)
         else:
             return super().__inc__(key, value, *args, **kwargs)
 
 
 class GNNPolicy_class(torch.nn.Module):
-    def __init__(self, TaskName=None):
+    def __init__(self, TaskName="CA"):
         super().__init__()
         emb_size = 64
         cons_nfeats = 4
@@ -192,9 +199,10 @@ class GNNPolicy_class(torch.nn.Module):
             torch.nn.Linear(emb_size, 1, bias=False),
         )
 
+        self.anchor_gnn = AnchorGNN(TaskName, emb_size).to(DEVICE)
+
     def forward(
-            self, constraint_features, edge_indices, edge_features, variable_features, c_mask=None
-            # , multimodal_features
+            self, constraint_features, edge_indices, edge_features, variable_features, v_class, c_class, c_mask=None
     ):
         reversed_edge_indices = torch.stack([edge_indices[1], edge_indices[0]], dim=0)
 
@@ -206,33 +214,30 @@ class GNNPolicy_class(torch.nn.Module):
         variable_features = self.se_var(variable_features)
 
         # Two half convolutions
-        variable_features = self.conv_c_to_v(
-            constraint_features, edge_indices, edge_features, variable_features
-        )
         constraint_features = self.conv_v_to_c(
             variable_features, reversed_edge_indices, edge_features, constraint_features
+        )
+
+        variable_features = self.conv_c_to_v(
+            constraint_features, edge_indices, edge_features, variable_features
         )
 
         constraint_features = self.dropout(constraint_features)
         variable_features = self.dropout(variable_features)
 
-        variable_features = self.conv_c_to_v2(
-            constraint_features, edge_indices, edge_features, variable_features
-        )
-
         constraint_features = self.conv_v_to_c2(
             variable_features, reversed_edge_indices, edge_features, constraint_features
         )
 
-        if c_mask is not None:
-            mask_constraint_features = constraint_features[c_mask == 1]
-        else:
-            mask_constraint_features = constraint_features
+        variable_features = self.conv_c_to_v2(
+            constraint_features, edge_indices, edge_features, variable_features
+        )
 
-        con_output = torch.sigmoid(self.con_mlp(mask_constraint_features).squeeze(-1) / self.temperature)
+        variable_features, constraint_features = self.anchor_gnn(variable_features, constraint_features, v_class, c_class)
+
         var_output = torch.sigmoid(self.var_mlp(variable_features).squeeze(-1) / self.temperature)
 
-        return con_output, var_output
+        return var_output
 
 
 class GraphDataset_class(torch_geometric.data.Dataset):
@@ -306,9 +311,13 @@ class GraphDataset_class(torch_geometric.data.Dataset):
         BG, sols, objs, varNames, slacks = self.process_sample(self.sample_files[index])
         critical_list_by_sparse, var_num_list = self.get_critical(self.sample_files[index], method="kmeans")
 
-        A, v_map, v_nodes, c_nodes, b_vars = BG
+        A, v_map, v_nodes, c_nodes, b_vars, v_class, c_class = BG
         # sparse_cluster, labels = utils.get_label_by_kmeans(coupling_degrees)
         # critical_list_by_coupling = [1 if label == sparse_cluster else 0 for label in labels]
+
+        n_v_class = len(v_class)
+        n_c_class = len(c_class)
+
 
         critical_list = critical_list_by_sparse
 
@@ -321,11 +330,16 @@ class GraphDataset_class(torch_geometric.data.Dataset):
 
         constraint_features[torch.isnan(constraint_features)] = 1
 
+        v_class_list = utils.convert_class_to_labels(v_class, variable_features.shape[0])
+        c_class_list = utils.convert_class_to_labels(c_class, constraint_features.shape[0])
+
         graph = BipartiteNodeData(
             torch.FloatTensor(constraint_features),
             torch.LongTensor(edge_indices),
             torch.FloatTensor(edge_features),
             torch.FloatTensor(variable_features),
+            torch.LongTensor(v_class_list),
+            torch.LongTensor(c_class_list),
         )
 
         c_mask = []
@@ -369,37 +383,146 @@ class GraphDataset_class(torch_geometric.data.Dataset):
 
 
 class AnchorGNN(torch.nn.Module):
-    def __init__(self, task):
+    def __init__(self, task, emb_size=64):
         super().__init__()
-        emb_size = 64
-        var_fea, con_fea, edge, edge_feature = self.get_by_semantics(task)
+        self.emb_size = emb_size
+        path = "../../local_models/t5-base"
+        tokenizer = T5Tokenizer.from_pretrained(path, legacy=False)
+        text_encoder = T5EncoderModel.from_pretrained(path).to(DEVICE)
+        var_fea, con_fea, edge, edge_feature = self.get_by_semantics(task, tokenizer, text_encoder)
+        self.proj = torch.nn.Linear(768, emb_size).to(DEVICE)
+
         self.v_sem_fea = var_fea
-        self.v_n_class = var_fea[0]
+        self.v_n_class = var_fea.shape[0]
 
         self.c_sem_fea = con_fea
-        self.c_n_class = con_fea[0]
+        self.c_n_class = con_fea.shape[0]
 
         self.edge = edge
         self.edge_fea = edge_feature
-        self.self_att = torch.nn.MultiheadAttention(emb_size, num_heads=4, batch_first=True)
-        self.cross_att = torch.nn.MultiheadAttention(emb_size, num_heads=4, batch_first=True)
+        self.self_att = torch.nn.MultiheadAttention(self.emb_size, num_heads=4, batch_first=False)
+        self.cross_att_var = torch.nn.MultiheadAttention(self.emb_size, num_heads=4, batch_first=False)
+        self.cross_att_con = torch.nn.MultiheadAttention(self.emb_size, num_heads=4, batch_first=False)
+        self.layer_norm = nn.LayerNorm(self.emb_size)
+
+    def get_by_semantics(self, task, tokenizer, text_encoder):
+        # get var_fea, con_fea, edge, edge_feature
+        # edge为抽象模型边的索引，edge_feature为边的特征
+        var_fea = []
+        con_fea = []
+        edge = []
+        edge_feature = []
+        config_path = './task_config.json'
+        with open(config_path, 'r') as f:
+            config_json = json.load(f)
+        if "task" not in config_json or task not in config_json["task"]:
+            raise ValueError(f"Task '{task}' not found in the JSON configuration.")
+        task_details = config_json["task"][task]
+        task_description = task_details.get("task_description", "No description available")
+        task_text = f"task: {task}\ntask_description: {task_description}\n\n"
+        var_text = []
+        con_text = []
+        if "variable_type" in task_details:
+            for var_name, var_details in task_details["variable_type"].items():
+                var_description = var_details.get("description", "No description available")
+                var_type = var_details.get("type", "No type specified")
+                var_index = var_details.get("index", "No index specified")
+                var_range = var_details.get("range", "No range specified")
+                var_constraints = var_details.get("constraints", "No constraints specified")
+
+                var_text.append(
+                    task_text + f"variable_name: {var_name}, variable_index: {var_index}, variable_type: {var_type}, variable_description: {var_description}, variable_range: {var_range}, variable_constraints: {var_constraints}\n\n")
+        if "constraint_type" in task_details:
+            for con_name, con_details in task_details["constraint_type"].items():
+                con_description = con_details.get("description", "No description available")
+                con_type = con_details.get("type", "No type specified")
+                con_index = con_details.get("index", "No index specified")
+                con_expression = con_details.get("expression", "No expression specified")
+                con_constraints = con_details.get("constraints", "No constraints specified")
+
+                con_text.append(
+                    task_text + f"constraint_name: {con_name}, constraint_index: {con_index}, constraint_type: {con_type}, constraint_description: {con_description}, constraint_expression: {con_expression}, constraint_constraints: {con_constraints}\n\n")
+
+        for var in var_text:
+            text_tokenizer = tokenizer(var, return_tensors="pt").to(DEVICE)
+            text_embedding = text_encoder(**text_tokenizer).last_hidden_state[:, -1, :]
+            var_fea.append(text_embedding)
+        var_fea = torch.stack(var_fea)
+
+        for con in con_text:
+            text_tokenizer = tokenizer(con, return_tensors="pt").to(DEVICE)
+            text_embedding = text_encoder(**text_tokenizer).last_hidden_state[:, -1, :]
+            con_fea.append(text_embedding)
+        con_fea = torch.stack(con_fea)
+
+        return var_fea, con_fea, edge, edge_feature
 
     def forward(self, v, c, v_class, c_class, mpnn=False):
         # v_class: [[indices],...,[indices]]   get batch
-        # c_class:
-        # v_fea 先 self-att( /MPNN + 残差) 后与v cross att: v_fea q, v k v
-        # get final v_class_f, c_class_f
-        # v_class_f^T W v ?  融合 or concat
+        v_class = v_class.to(v.device)
+        c_class = c_class.to(c.device)
         if not mpnn:
             fea = torch.concat([self.v_sem_fea, self.c_sem_fea], dim=0)
+            fea = self.proj(fea)  # 768 -> 64
             fea_sem = self.self_att(fea, fea, fea)[0]
+            fea_sem = self.layer_norm(fea_sem + fea).squeeze(1)
             v_sem = fea_sem[:self.v_n_class]
             c_sem = fea_sem[-self.c_n_class:]
-            for v_i in self.v_n_class:
-                v_i_fea = v[v_class[v_i]]
-                v_i_sem = v_sem[v_i].unsqueeze(0)
-                v_i_final = self.cross_att(v_i_sem, v_i_fea, v_i_fea)
-                # v_final =
 
+            v_updates = torch.zeros_like(v)
+            c_updates = torch.zeros_like(c)
+
+            for v_i in range(self.v_n_class):
+                v_i_indices = torch.nonzero(v_class == v_i, as_tuple=False).squeeze(1)
+                if len(v_i_indices) == 0:
+                    continue
+                v_i_fea = v[v_i_indices].unsqueeze(1)
+                v_i_sem = v_sem[v_i].unsqueeze(0).unsqueeze(1)
+                v_i_final = self.cross_att_var(v_i_sem, v_i_fea, v_i_fea)[0].squeeze(1)
+                # 加法融合
+                v_updates[v_i_indices] += v_i_final
+            v = v + v_updates
+
+            for c_i in range(self.c_n_class):
+                c_i_indices = torch.nonzero(c_class == c_i, as_tuple=False).squeeze(1)
+                if len(c_i_indices) == 0:
+                    continue
+                c_i_fea = c[c_i_indices].unsqueeze(1)
+                c_i_sem = c_sem[c_i].unsqueeze(0).unsqueeze(1)
+                c_i_final = self.cross_att_con(c_i_sem, c_i_fea, c_i_fea)[0].squeeze(1)
+                c_updates[c_i_indices] += c_i_final
+            c = c + c_updates
+            # fea = torch.concat([self.v_sem_fea, self.c_sem_fea], dim=0)
+            # fea = self.proj(fea)  # 768 -> 64
+            # fea_sem = self.self_att(fea, fea, fea)[0]
+            # fea_sem = self.layer_norm(fea_sem + fea).squeeze(1)
+            # v_sem = fea_sem[:self.v_n_class]
+            # c_sem = fea_sem[-self.c_n_class:]
+            #
+            # v_mask = (v_class.unsqueeze(1) == torch.arange(self.v_n_class, device=v.device).unsqueeze(0))
+            # v_mask = v_mask.float()
+            # v_class_count = v_mask.sum(dim=0, keepdim=True) + 1e-8
+            # v_i_fea = torch.matmul(v_mask.T, v) / v_class_count.T  # 平均池化 [n_classes, dim]
+            # v_i_fea = v_i_fea.unsqueeze(1)  # [n_classes, 1, dim]
+            # v_i_sem = v_sem.unsqueeze(1)  # [n_classes, 1, dim]
+            #
+            # v_i_final = self.cross_att_var(v_i_sem, v_i_fea, v_i_fea)[0].squeeze(1)    # [n_classes, dim]
+            # v_i_final = self.layer_norm(v_i_final)
+            # v_updates = torch.matmul(v_mask, v_i_final)  # [n_variables, dim]
+            # v = v + v_updates
+            #
+            # c_mask = (c_class.unsqueeze(1) == torch.arange(self.c_n_class, device=c.device).unsqueeze(0))
+            # c_mask = c_mask.float()
+            # c_class_count = c_mask.sum(dim=0, keepdim=True) + 1e-8
+            # c_i_fea = torch.matmul(c_mask.T, c) / c_class_count.T  # 平均池化 [n_classes, dim]
+            # c_i_fea = c_i_fea.unsqueeze(1)  # [n_classes, 1, dim]
+            # c_i_sem = c_sem.unsqueeze(1)  # [n_classes, 1, dim]
+            #
+            # c_i_final = self.cross_att_con(c_i_sem, c_i_fea, c_i_fea)[0].squeeze(1) # [n_classes, dim]
+            # c_i_final = self.layer_norm(c_i_final)
+            # c_updates = torch.matmul(c_mask, c_i_final)  # [n_constraints, dim]
+            # c = c + c_updates
         else:
             pass
+
+        return v, c

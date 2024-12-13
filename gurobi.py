@@ -1,10 +1,11 @@
 import os.path
 import pickle
+import random
 from multiprocessing import Process, Queue
 import gurobipy as gp
 import numpy as np
 import argparse
-from helper import get_a_new2
+from helper import get_a_new2, get_bigraph, get_pattern
 from datetime import datetime
 
 
@@ -78,21 +79,22 @@ def collect(ins_dir, q, sol_dir, log_dir, bg_dir, settings):
 
         filepath = os.path.join(ins_dir, filename)
 
+        # get bipartite graph , binary variables' indices
+        bg_file = os.path.join(bg_dir, filename + '.bg')
+        if not os.path.isfile(bg_file):
+            A2, v_map2, v_nodes2, c_nodes2, b_vars2, v_class, c_class, _ = get_bigraph(filepath, v_class_name,c_class_name)
+            BG_data = [A2, v_map2, v_nodes2, c_nodes2, b_vars2, v_class, c_class]
+            pickle.dump(BG_data, open(os.path.join(bg_dir, filename + '.bg'), 'wb'))
+
         sol_file = os.path.join(sol_dir, filename + '.sol')
         if not os.path.isfile(sol_file):
             sol_data = solve_grb(filepath, log_dir, settings)
             pickle.dump(sol_data, open(sol_file, 'wb'))
 
-        # get bipartite graph , binary variables' indices
-        bg_file = os.path.join(bg_dir, filename + '.bg')
-        if not os.path.isfile(bg_file):
-            A2, v_map2, v_nodes2, c_nodes2, b_vars2, _ = get_a_new2(filepath, couple=0)
-            BG_data = [A2, v_map2, v_nodes2, c_nodes2, b_vars2]
-            pickle.dump(BG_data, open(os.path.join(bg_dir, filename + '.bg'), 'wb'))
 
 
 if __name__ == '__main__':
-    sizes = ["case118"]
+    sizes = ["IP"]
     # sizes=["IP","WA","IS","CA","NNV"]
 
     parser = argparse.ArgumentParser()
@@ -138,8 +140,12 @@ if __name__ == '__main__':
             'threads': args.threads,
 
         }
-
+        v_class_name, c_class_name = get_pattern("./task_config.json", size)
         filenames = os.listdir(INS_DIR)
+        num = min(400, len(filenames))
+        random.seed(42)
+        random.shuffle(filenames)
+        filenames = filenames[:num]
 
         q = Queue()
         # add ins

@@ -1,6 +1,4 @@
 import os
-import warnings
-from transformers import T5Tokenizer, T5EncoderModel
 import torch
 import torch_geometric
 import random
@@ -17,8 +15,8 @@ torch.backends.cudnn.benchmark = True
 
 # 4 public datasets, IS, WA, CA, IP
 # train task
-TaskName = "CA_m"
-multimodal = True
+TaskName = "CA"
+multimodal = False
 warnings.filterwarnings("ignore")
 # set folder
 train_task = f'{TaskName}_train'
@@ -42,13 +40,13 @@ NUM_WORKERS = 0
 WEIGHT_NORM = 100
 
 # dataset task
-TaskName = "CA_m"
+TaskName = "CA"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 DIR_BG = f'./dataset/{TaskName}/BG'
 DIR_SOL = f'./dataset/{TaskName}/solution'
 sample_names = os.listdir(DIR_BG)
 sample_files = [(os.path.join(DIR_BG, name), os.path.join(DIR_SOL, name).replace('bg', 'sol')) for name in sample_names]
-train_files, valid_files = utils.split_sample_by_blocks(sample_files, 0.8, block_size=100)
+train_files, valid_files = utils.split_sample_by_blocks(sample_files, 0.9, block_size=100)
 
 if TaskName == "IP":
     # Add position embedding for IP model, due to the strong symmetry
@@ -58,7 +56,8 @@ elif multimodal:
     from GCN import GraphDataset
     from GCN import GNNPolicy_multimodal as GNNPolicy
 else:
-    from GCN import GraphDataset, GNNPolicy
+    from GCN_class import GraphDataset_class as GraphDataset
+    from GCN_class import GNNPolicy_class as GNNPolicy
 
 train_data = GraphDataset(train_files)
 train_loader = torch_geometric.loader.DataLoader(train_data, batch_size=BATCH_SIZE, shuffle=True,
@@ -71,7 +70,7 @@ PredictModel = GNNPolicy(TaskName).to(DEVICE)
 
 
 def lr_lambda(epoch):
-    return 0.95 ** ((epoch + 1) // 20)
+    return 0.95 ** ((epoch + 1) // 10)
 
 
 def EnergyWeightNorm(task):
@@ -113,7 +112,7 @@ def train(predict, data_loader, epoch, optimizer=None, weight_norm=1):
         for step, batch in enumerate(tqdm(data_loader, desc=f"{desc}Epoch {epoch}")):
 
             batch = batch.to(DEVICE)
-            accumulation_steps = 16
+            accumulation_steps = 4
             # get target solutions in list format
             solInd = batch.nsols
             target_sols = []
@@ -141,8 +140,9 @@ def train(predict, data_loader, epoch, optimizer=None, weight_norm=1):
                 batch.edge_index,
                 batch.edge_attr,
                 batch.variable_features,
+                batch.v_class,
+                batch.c_class,
             )
-            BD = BD.sigmoid()
 
             # compute loss
             loss = 0
@@ -174,7 +174,7 @@ def train(predict, data_loader, epoch, optimizer=None, weight_norm=1):
                 sample_loss = sum_loss * weight[:, None]
                 loss += sample_loss.sum()
             if optimizer is not None:
-                loss.backward()
+                loss.backward(retain_graph=True)
             if optimizer is not None and (step + 1) % accumulation_steps == 0:
                 optimizer.step()
                 optimizer.zero_grad()
@@ -199,7 +199,7 @@ for epoch in range(NB_EPOCHS):
     scheduler.step()
     print(f"Epoch {epoch} Train loss: {train_loss:0.3f}")
     valid_loss = train(PredictModel, valid_loader, epoch, None, weight_norm)
-    print(f"Epoch {epoch} Valid loss: {valid_loss:0.3f}")
+    print(f"Epoch {epoch} Valid loss: {valid_loss:0.3f}\n")
     if valid_loss < best_val_loss:
         best_val_loss = valid_loss
         torch.save(PredictModel.state_dict(), model_save_path + 'model_best.pth')
