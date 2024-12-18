@@ -331,7 +331,7 @@ def get_a_new2(ins_name):
     # vars:  [obj coeff, norm_coeff, degree, Bin?]
     m = Model('model')
     m.hideOutput(True)
-    m.readProblem(ins_name)
+    m.readProblem(filename=ins_name)
 
     ncons = m.getNConss()
     nvars = m.getNVars()

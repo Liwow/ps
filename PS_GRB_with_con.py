@@ -4,12 +4,11 @@ from gurobipy import GRB
 import argparse
 import gc
 import helper
-import test
+import gp_tools
 import random
 import os
 import numpy as np
 import torch
-from utils import GNNPolicyWithCustomForward
 from time import time
 from helper import get_a_new2
 import logging
@@ -93,7 +92,7 @@ def modify_by_predict(model, predict, k=0, fix=0, th=30, n=0):
         print(f"预测错的元素索引: {wrong_indices[:200]}")
         with open(log_file, 'a') as f:
             f.write(f"预测错的元素索引: {wrong_indices[:200]}")
-        most_tight_constraints, count_tight = test.get_most_tight_constraints(slacks, ct_constraints)
+        most_tight_constraints, count_tight = gp_tools.get_most_tight_constraints(slacks, ct_constraints)
         # print(f"最优解和预测约束中松弛度都为 0 的相同约束个数: {count_tight}")
     if fix == 0:
         print("****** predict do nothing! *********")
@@ -198,7 +197,7 @@ def test_hyperparam(task):
     elif task == "case2868rte":
         return 30000, 50, 500, 4000
     elif task == "case2869pegase":
-        return 22000, 50, 600, 2000
+        return 22000, 50, 600, 4000
 
 
 k_0, k_1, delta, kc = test_hyperparam(TaskName)

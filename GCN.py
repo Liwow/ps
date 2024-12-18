@@ -16,7 +16,7 @@ DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 class GNNPolicy(torch.nn.Module):
-    def __init__(self, TaskName=None):
+    def __init__(self, TaskName=None, position=False):
         super().__init__()
         emb_size = 64
         cons_nfeats = 4
@@ -186,7 +186,7 @@ class GraphDataset(torch_geometric.data.Dataset):
     It can be used in turn by the data loaders provided by pytorch geometric.
     """
 
-    def __init__(self, sample_files):
+    def __init__(self, sample_files, position=False):
         super().__init__(root=None, transform=None, pre_transform=None)
         self.sample_files = sample_files
 
@@ -220,7 +220,7 @@ class GraphDataset(torch_geometric.data.Dataset):
         # nbp, sols, objs, varInds, varNames = self.process_sample(self.sample_files[index])
         BG, sols, objs, varNames = self.process_sample(self.sample_files[index])
 
-        A, v_map, v_nodes, c_nodes, b_vars = BG
+        A, v_map, v_nodes, c_nodes, b_vars, _, _ = BG
 
         constraint_features = c_nodes
         edge_indices = A._indices()
@@ -297,7 +297,7 @@ class BipartiteNodeData(torch_geometric.data.Data):
 
 
 class GNNPolicy_position(torch.nn.Module):
-    def __init__(self, TaskName=None):
+    def __init__(self, TaskName=None, position=False):
         super().__init__()
         emb_size = 64
         cons_nfeats = 4
@@ -768,7 +768,7 @@ class GraphDataset_position(torch_geometric.data.Dataset):
     It can be used in turn by the data loaders provided by pytorch geometric.
     """
 
-    def __init__(self, sample_files):
+    def __init__(self, sample_files, position=False):
         super().__init__(root=None, transform=None, pre_transform=None)
         self.sample_files = sample_files
 
@@ -799,7 +799,7 @@ class GraphDataset_position(torch_geometric.data.Dataset):
         # nbp, sols, objs, varInds, varNames = self.process_sample(self.sample_files[index])
         BG, sols, objs, varNames = self.process_sample(self.sample_files[index])
 
-        A, v_map, v_nodes, c_nodes, b_vars = BG
+        A, v_map, v_nodes, c_nodes, b_vars, _, _ = BG
 
         constraint_features = c_nodes
         edge_indices = A._indices()

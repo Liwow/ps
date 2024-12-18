@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shutil
 import gurobipy as gp
 import torch
@@ -303,62 +304,72 @@ def search(m, scores, delta):
     return m
 
 
-def get_by_semantics(task, tokenizer, text_encoder):
-    # get var_fea, con_fea, edge, edge_feature
-    var_fea = []
-    con_fea = []
-    edge = []
-    edge_feature = []
-    config_path = './task_config.json'
-    with open(config_path, 'r') as f:
-        config_json = json.load(f)
-    if "task" not in config_json or task not in config_json["task"]:
-        raise ValueError(f"Task '{task}' not found in the JSON configuration.")
-    task_details = config_json["task"][task]
-    task_description = task_details.get("task_description", "No description available")
-    task_text = f"task: {task}\ntask_description: {task_description}\n\n"
-    var_text = []
-    con_text = []
-    if "var_type" in task_details:
-        for var_name, var_details in task_details["var_type"].items():
-            var_description = var_details.get("description", "No description available")
-            var_type = var_details.get("type", "No type specified")
-            var_index = var_details.get("index", "No index specified")
-            var_range = var_details.get("range", "No range specified")
-            var_constraints = var_details.get("constraints", "No constraints specified")
+def get_gp_best_objective(log_folder):
+    best_objectives = []
+    pattern = r"Best objective ([\d.e+-]+)"  # 正则表达式匹配 "Best objective " 后面的值
 
-            var_text.append(
-                task_text + f"variable_name: {var_name}, variable_index: {var_index}, variable_type: {var_type}, variable_description: {var_description}, variable_range: {var_range}, variable_constraints: {var_constraints}\n\n")
-    if "con_type" in task_details:
-        for con_name, con_details in task_details["con_type"].items():
-            con_description = con_details.get("description", "No description available")
-            con_type = con_details.get("type", "No type specified")
-            con_index = con_details.get("index", "No index specified")
-            con_expression = con_details.get("expression", "No expression specified")
-            con_constraints = con_details.get("constraints", "No constraints specified")
+    # 遍历文件夹中的所有文件
+    for filename in os.listdir(log_folder):
+        filepath = os.path.join(log_folder, filename)
 
-            con_text.append(
-                task_text + f"constraint_name: {con_name}, constraint_index: {con_index}, constraint_type: {con_type}, constraint_description: {con_description}, constraint_expression: {con_expression}, constraint_constraints: {con_constraints}\n\n")
+        # 确保只处理文件
+        if os.path.isfile(filepath):
+            try:
+                with open(filepath, 'r') as f:
+                    for line in f:
+                        # 查找匹配的值
+                        match = re.search(pattern, line)
+                        if match:
+                            # 提取第一次出现的值并保存到列表中
+                            best_objectives.append(float(match.group(1)))
+                            break  # 只提取第一次出现的值
+            except Exception as e:
+                print(f"Error reading file {filename}: {e}")
 
-    var_n = len(var_text)
+    return best_objectives
+
+
+def primal_integral_callback(model, where):
+    """
+    回调函数，用于记录求解过程中的 Primal Gap 和时间点
+    """
+    if where == gp.GRB.Callback.MIP:
+        # 获取当前已用时间
+        time_elapsed = model.cbGet(gp.GRB.Callback.RUNTIME)
+
+        # 获取当前的上界和下界
+        ub = model.cbGet(gp.GRB.Callback.MIP_OBJBST)  # Best solution (upper bound)
+        lb = model.cbGet(gp.GRB.Callback.MIP_OBJBND)  # Best bound (lower bound)
+
+        # 如果上下界合法，计算 Primal Gap 并记录
+        if lb < gp.GRB.INFINITY and ub < gp.GRB.INFINITY and lb != 0:
+            primal_gap = abs((ub - lb) / abs(lb))
+            # 记录时间点和对应的 Primal Gap
+            primal_integral_callback.gap_records.append((time_elapsed, primal_gap))
+
+
 
 
 if __name__ == "__main__":
-    # file = "./instance/test/CA_m/CA_m_69.lp"
+    file = "./instance/test/CA/CA_69.lp"
+    log_file = "./logs/CA/CA_GRB_Predect&Search"
     # main(file, n=0, m=30)
-    # get_by_semantics("CA", None, None)
-    from transformers import T5Tokenizer, T5ForConditionalGeneration
+    primal_integral_callback.gap_records = []
 
-    # 模型和分词器名称
-    model_name = "t5-base"
-    save_directory = "../../../local_models/t5_base"  # 本地保存路径
+    # 创建模型并优化
+    model = gp.read(file)
+    model.optimize(primal_integral_callback)
 
-    # 加载模型和分词器
-    model = T5ForConditionalGeneration.from_pretrained(model_name)
-    tokenizer = T5Tokenizer.from_pretrained(model_name)
+    # 计算 Primal Integral
+    gap_records = primal_integral_callback.gap_records
+    primal_integral = 0.0
 
-    # 保存到本地
-    model.save_pretrained(save_directory)
-    tokenizer.save_pretrained(save_directory)
+    # 确保记录有数据
+    if len(gap_records) > 1:
+        for i in range(1, len(gap_records)):
+            t1, gap1 = gap_records[i - 1]
+            t2, gap2 = gap_records[i]
+            # 梯形积分法计算 Primal Integral
+            primal_integral += (gap1 + gap2) / 2 * (t2 - t1)
 
-    print(f"T5-base model and tokenizer saved to {save_directory}")
+    print(f"Primal Integral: {primal_integral:.4f}")

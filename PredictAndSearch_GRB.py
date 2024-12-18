@@ -4,15 +4,16 @@ from gurobipy import GRB
 import argparse
 import utils
 import helper
-import test
-from test import validate_solution_in_original_model, change_model
+import gp_tools
+import gc
 import random
 import os
 import numpy as np
 import torch
 from time import time
 from helper import get_a_new2, get_bigraph, get_pattern
-
+from GCN_class import getPE
+from gp_tools import primal_integral_callback, get_gp_best_objective
 # def modify(model, n=0, k=0, fix=0):
 #     # fix 0:no fix 1:随机 2:排序 3: 交集
 #     if model.Status not in [GRB.OPTIMAL, GRB.TIME_LIMIT]:
@@ -56,12 +57,13 @@ from helper import get_a_new2, get_bigraph, get_pattern
 #         model.addConstr(gurobipy.LinExpr(coeffs, vars) == constr.RHS, name=f"{constr.ConstrName}_tight")
 
 
-DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+DEVICE = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 random.seed(0)
 torch.manual_seed(0)
 torch.cuda.manual_seed(0)
 multimodal = False
-TaskName = "CA___"
+TaskName = "CA_0"
+model_name = f'{TaskName}.pth'
 if TaskName == "CA_multi":
     multimodal = True
 # load pretrained model
@@ -74,14 +76,14 @@ else:
     # from GCN import GNNPolicy as GNNPolicy
     from GCN_class import GNNPolicy_class as GNNPolicy
 
-model_name = f'{TaskName}.pth'
-pathstr = f'./models/{model_name}'
-policy = GNNPolicy().to(DEVICE)
-state = torch.load(pathstr, map_location=torch.device('cuda:0'))
-policy.load_state_dict(state)
-
-# 4 public datasets, IS, WA, CA, IP
 TaskName = 'CA'
+postion = True
+gp_solve = False
+pathstr = f'./models/{model_name}'
+policy = GNNPolicy(TaskName, position=postion).to(DEVICE)
+state = torch.load(pathstr, map_location=DEVICE)
+policy.load_state_dict(state)
+policy.eval()
 
 
 def test_hyperparam(task):
@@ -93,7 +95,7 @@ def test_hyperparam(task):
         return 400, 5, 10
     elif task == "IS":
         return 300, 300, 20
-    elif task == "WA":
+    elif task == "WA":  # 0, 500, 10
         return 0, 500, 10
     elif task == "CA" or task == "CA_m":  # 600 0 1
         return 600, 0, 1
@@ -125,17 +127,17 @@ if not os.path.isdir(f'./logs/{TaskName}/{test_task}'):
 log_folder = f'./logs/{TaskName}/{test_task}'
 
 sample_names = sorted(os.listdir(f'./instance/test/{TaskName}'))
-count = 0
+
+
 subop_total = 0
-infeas_total = 0
 time_total = 0
 max_subop = -1
-max_infeas = -1
 max_time = 0
-gap_total = 0
+ps_int_total = 0
+gp_int_total = 0
 
-ALL_Test = 100
-epoch = 3
+ALL_Test = 60 #33
+epoch = 1
 TestNum = round(ALL_Test / epoch)
 
 for e in range(epoch):
@@ -149,9 +151,10 @@ for e in range(epoch):
         # A, v_map, v_nodes, c_nodes, b_vars = get_a_new2(ins_name_to_read)
         constraint_features = c_nodes.cpu()
         constraint_features[torch.isnan(constraint_features)] = 1  # remove nan value
-        variable_features = v_nodes
-        if TaskName == "IP":
-            variable_features = postion_get(variable_features)
+        variable_features = getPE(v_nodes, postion)
+
+        # if TaskName == "IP":
+        #     variable_features = postion_get(variable_features)
         edge_indices = A._indices()
         edge_features = A._values().unsqueeze(1)
         edge_features = torch.ones(edge_features.shape)
@@ -168,7 +171,11 @@ for e in range(epoch):
             torch.LongTensor(v_class).to(DEVICE),
             torch.LongTensor(c_class).to(DEVICE),
         ).cpu().squeeze()
-        x_pred = (BD > 0.5).float()
+        pred = BD.detach().numpy()
+        rounding_errors = np.abs(np.round(pred) - pred)
+        m = 0.1
+        top_m_indices = np.argsort(-rounding_errors)[:int(m * len(pred))]
+        # naive_distance = np.sum(np.abs(np.round(pred[top_m_indices]) - label[top_m_indices]))
 
         # align the variable name betweend the output and the solver
         all_varname = []
@@ -212,18 +219,33 @@ for e in range(epoch):
         # 修复预测初始解，得到初始可行解
         # _, tc_1 = test.project_to_feasible_region_and_get_tight_constraints(m, x_pred)
 
-        m.Params.TimeLimit = 1000
+        m.Params.TimeLimit = 800
         m.Params.Threads = 32
+        m.Params.MIPFocus = 1
         m.Params.LogFile = f'{log_folder}/{test_ins_name}.log'
         gurobipy.setParam('LogToConsole', 1)
 
-        # m.optimize()
-        # obj = m.objVal
-        obj = 23791.7
+        if gp_solve:
+            primal_integral_callback.gap_records = []
+            m.optimize(primal_integral_callback)
+            obj = m.objVal
+            gap_records = primal_integral_callback.gap_records
+            primal_integral = 0.0
+            if len(gap_records) > 1:
+                for i in range(1, len(gap_records)):
+                    t1, gap1 = gap_records[i - 1]
+                    t2, gap2 = gap_records[i]
+                    # 梯形积分法计算 Primal Integral
+                    primal_integral += (gap1 + gap2) / 2 * (t2 - t1)
+            gp_int_total += primal_integral
+            print("gp_int_total：", gp_int_total)
+        else:
+            obj = get_gp_best_objective(f'./logs/{TaskName}/{test_task}')[(0 + e) * TestNum + ins_num]
         print("gurobi 最优解：", obj)
         m.reset()
-        m.Params.TimeLimit = 1000
-        m.Params.Threads = 8
+        m.Params.TimeLimit = 800
+        m.Params.Threads = 32
+        m.Params.MIPFocus = 1
 
         # trust region method implemented by adding constraints
         instance_variabels = m.getVars()
@@ -247,7 +269,19 @@ for e in range(epoch):
             all_tmp += tmp
         m.addConstr(all_tmp <= delta, name="sum_alpha")
         m.update()
-        m.optimize()
+        primal_integral_callback.gap_records = []
+        m.optimize(primal_integral_callback)
+        gap_records = primal_integral_callback.gap_records
+        primal_integral = 0.0
+        if len(gap_records) > 1:
+            for i in range(1, len(gap_records)):
+                t1, gap1 = gap_records[i - 1]
+                t2, gap2 = gap_records[i]
+                # 梯形积分法计算 Primal Integral
+                primal_integral += (gap1 + gap2) / 2 * (t2 - t1)
+
+        ps_int_total += primal_integral
+        print(f"ps_int_total: {ps_int_total}")
 
         # new_solution = {var.VarName: var.X for var in m.getVars()}
         # validate_solution_in_original_model(o_m, new_solution)
@@ -257,35 +291,27 @@ for e in range(epoch):
         pre_obj = m.objVal
         if max_time <= t:
             max_time = t
-        if m.status == GRB.OPTIMAL:
+        if m.status in [GRB.OPTIMAL, GRB.TIME_LIMIT]:
             subop = abs(pre_obj - obj) / abs(obj)
             subop_total += subop
-            if subop > max_subop:
-                max_subop = subop
-            if subop < 1e-4:
-                count += 1
-            print(f"ps 最优值：{pre_obj}; subopt: {round(subop, 4)}")
-        if m.status == GRB.TIME_LIMIT:
-            mip_gap = m.MIPGap
-            gap_total += mip_gap
-            print(f"ps 最优值：{pre_obj}; gap: {round(mip_gap, 4)}")
-        else:
-            print("不可行")
+            print(f"ps 最优值：{pre_obj}; subopt: {round(subop, 4)}; subop_total: {round(subop_total/(ins_num+1), 4)}")
+        m.dispose()
+        gc.collect()
+
 
 total_num = TestNum * epoch
-mean_gap = gap_total / TestNum / epoch
 results = {
-    "acc": count / total_num,
     "avg_subopt": round(subop_total / total_num, 6),
-    "max_subopt": round(max_subop, 6),
     "mean_time_pred": round(time_total / total_num, 6),
-    "max_time": round(max_time, 6)
+    "max_time": round(max_time, 6),
+    "gurobi_integral": round(gp_int_total / total_num, 6),
+    "ps_gap_integral": round(ps_int_total / total_num, 6),
 }
 results_dir = f"/home/ljj/project/predict_and_search/results/{TaskName}/"
 if not os.path.isdir(results_dir):
     os.makedirs(results_dir)
-with open(results_dir + "results.json", "w") as file:
+with open(results_dir + "results.json", "a") as file:
     json.dump(results, file)
-print("acc: ", results['acc'])
 print("avg_subopt： ", results['avg_subopt'])
-print("max_subopt: ", results['max_subopt'])
+print("ps_gap_integral： ", results['ps_gap_integral'])
+

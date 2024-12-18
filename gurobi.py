@@ -7,6 +7,7 @@ import numpy as np
 import argparse
 from helper import get_a_new2, get_bigraph, get_pattern
 from datetime import datetime
+import gc
 
 
 def solve_grb(filepath, log_dir, settings):
@@ -22,6 +23,7 @@ def solve_grb(filepath, log_dir, settings):
         pass
 
     m.Params.LogFile = log_path
+    m.setParam("MIPFocus", 3)
     m.optimize()
 
     sols = []
@@ -37,6 +39,7 @@ def solve_grb(filepath, log_dir, settings):
 
     if m.Status not in [gp.GRB.OPTIMAL, gp.GRB.TIME_LIMIT]:
         print("*********No optimal found !*************")
+        m.dispose()
         return None
 
     for sn in range(solc):
@@ -65,6 +68,8 @@ def solve_grb(filepath, log_dir, settings):
         'objs': objs,
         'slacks': slacks
     }
+    m.dispose()
+    gc.collect()
 
     return sol_data
 
@@ -82,25 +87,33 @@ def collect(ins_dir, q, sol_dir, log_dir, bg_dir, settings):
         # get bipartite graph , binary variables' indices
         bg_file = os.path.join(bg_dir, filename + '.bg')
         if not os.path.isfile(bg_file):
-            A2, v_map2, v_nodes2, c_nodes2, b_vars2, v_class, c_class, _ = get_bigraph(filepath, v_class_name,c_class_name)
+            A2, v_map2, v_nodes2, c_nodes2, b_vars2, v_class, c_class, _ = get_bigraph(filepath, v_class_name,
+                                                                                       c_class_name)
             BG_data = [A2, v_map2, v_nodes2, c_nodes2, b_vars2, v_class, c_class]
-            pickle.dump(BG_data, open(os.path.join(bg_dir, filename + '.bg'), 'wb'))
+            with open(bg_file, 'wb') as bg_f:
+                pickle.dump(BG_data, bg_f)
+            del A2, v_map2, v_nodes2, c_nodes2, b_vars2, v_class, c_class, BG_data
+            gc.collect()
 
         sol_file = os.path.join(sol_dir, filename + '.sol')
         if not os.path.isfile(sol_file):
             sol_data = solve_grb(filepath, log_dir, settings)
-            pickle.dump(sol_data, open(sol_file, 'wb'))
+            if sol_data is not None:
+                with open(sol_file, 'wb') as sol_f:
+                    pickle.dump(sol_data, sol_f)
+            del sol_data
+            gc.collect()
 
+    gc.collect()
 
 
 if __name__ == '__main__':
     sizes = ["IP"]
     # sizes=["IP","WA","IS","CA","NNV"]
-
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataDir', type=str, default='./')
-    parser.add_argument('--nWorkers', type=int, default=32)
-    parser.add_argument('--maxTime', type=int, default=3600)
+    parser.add_argument('--nWorkers', type=int, default=16)
+    parser.add_argument('--maxTime', type=int, default=2400)
     parser.add_argument('--maxStoredSol', type=int, default=100)
     parser.add_argument('--threads', type=int, default=1)
     args = parser.parse_args()
@@ -142,7 +155,7 @@ if __name__ == '__main__':
         }
         v_class_name, c_class_name = get_pattern("./task_config.json", size)
         filenames = os.listdir(INS_DIR)
-        num = min(400, len(filenames))
+        num = min(300, len(filenames))
         random.seed(42)
         random.shuffle(filenames)
         filenames = filenames[:num]
@@ -173,5 +186,10 @@ if __name__ == '__main__':
             ps.append(p)
         for p in ps:
             p.join()
+
+
+        for p in ps:
+            p.close()  # 关闭进程资源
+        gc.collect()
 
         print('done')

@@ -4,6 +4,7 @@ import numpy as np
 from sklearn.cluster import KMeans
 import torch
 from torch.nn import DataParallel
+import math
 
 
 def split_sample_by_blocks(sample_files, train_rate, block_size):
@@ -104,3 +105,58 @@ def convert_class_to_labels(class_, n):
         for idx in indices:
             labels[idx] = class_idx  # 设置对应索引的类别
     return labels
+
+
+def test_hyperparam(task):
+    '''
+    set the hyperparams
+    k_0, k_1, delta
+    '''
+    if task == "IP":
+        return 400, 5, 10
+    elif task == "IS":
+        return 300, 300, 20
+    elif task == "WA":  # 0, 500, 10
+        return 0, 500, 10
+    elif task == "CA" or task == "CA_m":  # 600 0 1
+        return 600, 0, 1
+    elif task == "beasley":
+        return 50, 17, 10
+    elif task == "ns":
+        return 120, 18, 20
+    elif task == "binkar":
+        return 54, 24, 10
+    elif task == "neos":
+        return 20129, 569, 700  # 20741 609
+    elif task == "mas":
+        return 136, 14, 10
+    elif task == "markshare":
+        return 14, 12, 9
+
+
+def compare(pre_sol, sols, task):
+    # m 1 n 0
+    n, m, delta = test_hyperparam(task)
+    sorted_indices = torch.argsort(pre_sol, descending=True)  # 降序排序
+
+    pre_sol_rounded = torch.round(pre_sol)
+
+    top_m_indices = sorted_indices[:m] if m > 0 else []
+    bottom_n_indices = sorted_indices[-n:] if n > 0 else []
+    best_radio = 0
+    best_m_ratio = 0
+    best_n_ratio = 0
+    for i in range(20):
+        top_m_correct = (pre_sol_rounded[top_m_indices] == sols[i][top_m_indices]).sum().item()
+        bottom_n_correct = (pre_sol_rounded[bottom_n_indices] == sols[i][bottom_n_indices]).sum().item()
+        top_m_ratio = top_m_correct / m if m > 0 else 0
+        bottom_n_ratio = bottom_n_correct / n if n > 0 else 0
+        radio = (top_m_correct + bottom_n_correct) / (m + n)
+        if radio > best_radio:
+            best_radio = radio
+            best_m_ratio = top_m_ratio
+            best_n_ratio = bottom_n_ratio
+            acc = int(m + n - top_m_correct - bottom_n_correct <= delta)
+    # print(f"m 1 ratio: {top_m_ratio}, n 0 ratio: {bottom_n_ratio}, Total best ratio: {best radio}")
+
+    return best_radio
