@@ -11,7 +11,7 @@ import math
 import pyscipopt as scip
 import utils
 
-DEVICE = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
+DEVICE = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 
 class BipartiteGraphConvolution(torch_geometric.nn.MessagePassing):
@@ -328,7 +328,6 @@ class GraphDataset_class(torch_geometric.data.Dataset):
 
         variable_features = v_nodes
         edge_features = A._values().unsqueeze(1)
-        edge_features = torch.ones(edge_features.shape)
 
         variable_features = getPE(variable_features, self.position)
 
@@ -340,7 +339,7 @@ class GraphDataset_class(torch_geometric.data.Dataset):
         graph = BipartiteNodeData(
             torch.FloatTensor(constraint_features),
             torch.LongTensor(edge_indices),
-            torch.FloatTensor(edge_features),
+            torch.FloatTensor(edge_features.float()),
             torch.FloatTensor(variable_features),
             torch.LongTensor(v_class_list),
             torch.LongTensor(c_class_list),
@@ -478,7 +477,7 @@ class AnchorGNN(torch.nn.Module):
         )
 
         self.anchor1 = Anchor1(self.v_n_class, self.c_n_class, emb_size)
-        # self.anchor2 = Anchor2(self.v_n_class, self.c_n_class, emb_size)
+        self.anchor2 = Anchor2(self.v_n_class, self.c_n_class, emb_size)
         self.anchor3 = Anchor3(self.v_n_class, self.c_n_class, emb_size)
 
     def forward(self, v, c, v_class, c_class, mpnn=False):
@@ -588,39 +587,39 @@ class Anchor3(torch.nn.Module):
         return v_updates, c_updates
 
 
-# class Anchor2(torch.nn.Module):
-#     def __init__(self, v_n, c_n, emb_size=64):
-#         super().__init__()
-#         self.emb_size = emb_size
-#         self.v_n = v_n
-#         self.c_n = c_n
-#         self.layer_norm = nn.LayerNorm(self.emb_size)
-#         self.cross_att_var = torch.nn.MultiheadAttention(self.emb_size, num_heads=4, batch_first=False)
-#         self.cross_att_con = torch.nn.MultiheadAttention(self.emb_size, num_heads=4, batch_first=False)
-#
-#     def forward(self, v_s, c_s, v_sem, c_sem, v_class, c_class):
-#         v_updates = torch.zeros_like(v_s)
-#         c_updates = torch.zeros_like(c_s)
-#
-#         for v_i in range(self.v_n):
-#             v_i_indices = torch.nonzero(v_class == v_i, as_tuple=False).squeeze(1)
-#             if len(v_i_indices) == 0:
-#                 continue
-#             v_i_fea = v_s[v_i_indices].unsqueeze(1)
-#             v_i_sem = v_sem[v_i].unsqueeze(0).unsqueeze(1)
-#             v_i_final = self.cross_att_var(v_i_sem, v_i_fea, v_i_fea)[0].squeeze(1)
-#             v_updates[v_i_indices] += v_i_final
-#
-#         for c_i in range(self.c_n):
-#             c_i_indices = torch.nonzero(c_class == c_i, as_tuple=False).squeeze(1)
-#             if len(c_i_indices) == 0:
-#                 continue
-#             c_i_fea = c_s[c_i_indices].unsqueeze(1)
-#             c_i_sem = c_sem[c_i].unsqueeze(0).unsqueeze(1)
-#             c_i_final = self.cross_att_con(c_i_sem, c_i_fea, c_i_fea)[0].squeeze(1)
-#             c_updates[c_i_indices] += c_i_final
-#
-#         return v_updates, c_updates
+class Anchor2(torch.nn.Module):
+    def __init__(self, v_n, c_n, emb_size=64):
+        super().__init__()
+        self.emb_size = emb_size
+        self.v_n = v_n
+        self.c_n = c_n
+        self.layer_norm = nn.LayerNorm(self.emb_size)
+        self.cross_att_var = torch.nn.MultiheadAttention(self.emb_size, num_heads=4, batch_first=False)
+        self.cross_att_con = torch.nn.MultiheadAttention(self.emb_size, num_heads=4, batch_first=False)
+
+    def forward(self, v_s, c_s, v_sem, c_sem, v_class, c_class):
+        v_updates = torch.zeros_like(v_s)
+        c_updates = torch.zeros_like(c_s)
+
+        for v_i in range(self.v_n):
+            v_i_indices = torch.nonzero(v_class == v_i, as_tuple=False).squeeze(1)
+            if len(v_i_indices) == 0:
+                continue
+            v_i_fea = v_s[v_i_indices].unsqueeze(1)
+            v_i_sem = v_sem[v_i].unsqueeze(0).unsqueeze(1)
+            v_i_final = self.cross_att_var(v_i_sem, v_i_fea, v_i_fea)[0].squeeze(1)
+            v_updates[v_i_indices] += v_i_final
+
+        for c_i in range(self.c_n):
+            c_i_indices = torch.nonzero(c_class == c_i, as_tuple=False).squeeze(1)
+            if len(c_i_indices) == 0:
+                continue
+            c_i_fea = c_s[c_i_indices].unsqueeze(1)
+            c_i_sem = c_sem[c_i].unsqueeze(0).unsqueeze(1)
+            c_i_final = self.cross_att_con(c_i_sem, c_i_fea, c_i_fea)[0].squeeze(1)
+            c_updates[c_i_indices] += c_i_final
+
+        return v_updates, c_updates
 
 
 def getPE(var_fea, p=True, d_model=12):

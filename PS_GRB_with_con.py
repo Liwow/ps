@@ -12,7 +12,7 @@ import torch
 from time import time
 from helper import get_a_new2
 import logging
-
+DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 def modify(model, n=0, k=0, fix=0):
     # fix 0:no fix 1:随机 2:排序 3: 交集
@@ -130,7 +130,6 @@ def modify_by_predict(model, predict, k=0, fix=0, th=30, n=0):
     return ct_constraints
 
 
-DEVICE = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 device_ids = [0, 1]
 random.seed(0)
 torch.manual_seed(0)
@@ -240,7 +239,7 @@ for e in range(epoch):
             variable_features = postion_get(variable_features)
         edge_indices = A._indices()
         edge_features = A._values().unsqueeze(1)
-        edge_features = torch.ones(edge_features.shape)
+        # edge_features = torch.ones(edge_features.shape)
 
         m = gurobipy.read(ins_name_to_read)
         cons = m.getConstrs()

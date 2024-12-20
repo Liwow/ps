@@ -89,7 +89,7 @@ class GNNPolicy(torch.nn.Module):
         # A final MLP on the variable features
         output = self.output_module(variable_features).squeeze(-1)
 
-        return output
+        return output, variable_features, constraint_features
 
 
 class BipartiteGraphConvolution(torch_geometric.nn.MessagePassing):
@@ -227,14 +227,13 @@ class GraphDataset(torch_geometric.data.Dataset):
 
         variable_features = v_nodes
         edge_features = A._values().unsqueeze(1)
-        edge_features = torch.ones(edge_features.shape)
 
         constraint_features[torch.isnan(constraint_features)] = 1
 
         graph = BipartiteNodeData(
             torch.FloatTensor(constraint_features),
             torch.LongTensor(edge_indices),
-            torch.FloatTensor(edge_features),
+            torch.FloatTensor(edge_features.float()),
             torch.FloatTensor(variable_features),
         )
 
@@ -367,7 +366,7 @@ class GNNPolicy_position(torch.nn.Module):
         # A final MLP on the variable features
         output = self.output_module(variable_features).squeeze(-1)
 
-        return output
+        return output, variable_features, constraint_features
 
 
 # GNN merged a text by cross_attention
@@ -806,7 +805,6 @@ class GraphDataset_position(torch_geometric.data.Dataset):
 
         variable_features = v_nodes
         edge_features = A._values().unsqueeze(1)
-        edge_features = torch.ones(edge_features.shape)
 
         lens = variable_features.shape[0]
         feature_widh = 12  # max length 4095
@@ -936,7 +934,6 @@ class GraphDataset_constraint(torch_geometric.data.Dataset):
 
         variable_features = v_nodes
         edge_features = A._values().unsqueeze(1)
-        edge_features = torch.ones(edge_features.shape)
 
         constraint_features[torch.isnan(constraint_features)] = 1
 
@@ -1069,7 +1066,6 @@ class GraphDataset_loss(torch_geometric.data.Dataset):
 
         variable_features = v_nodes
         edge_features = A._values().unsqueeze(1)
-        edge_features = torch.ones(edge_features.shape)
 
         constraint_features[torch.isnan(constraint_features)] = 1
 

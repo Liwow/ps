@@ -17,7 +17,7 @@ torch.backends.cudnn.benchmark = True
 # train task
 TaskName = "CA"
 multimodal = False
-position = False
+position = True
 warnings.filterwarnings("ignore")
 # set folder
 train_task = f'{TaskName}_train'
@@ -42,7 +42,7 @@ WEIGHT_NORM = 100
 
 # dataset task
 TaskName = "CA"
-DEVICE = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 DIR_BG = f'./dataset/{TaskName}/BG'
 DIR_SOL = f'./dataset/{TaskName}/solution'
 sample_names = os.listdir(DIR_BG)
@@ -57,10 +57,10 @@ elif multimodal:
     from GCN import GraphDataset
     from GCN import GNNPolicy_multimodal as GNNPolicy
 else:
-    # from GCN_class import GraphDataset_class as GraphDataset
-    # from GCN_class import GNNPolicy_class as GNNPolicy
-    from GCN import GraphDataset
-    from GCN import GNNPolicy as GNNPolicy
+    from GCN_class import GraphDataset_class as GraphDataset
+    from GCN_class import GNNPolicy_class as GNNPolicy
+    # from GCN import GraphDataset
+    # from GCN import GNNPolicy as GNNPolicy
 
 train_data = GraphDataset(train_files, position=position)
 train_loader = torch_geometric.loader.DataLoader(train_data, batch_size=BATCH_SIZE, shuffle=True,
@@ -144,8 +144,8 @@ def train(predict, data_loader, epoch, optimizer=None, weight_norm=1):
                 batch.edge_index,
                 batch.edge_attr,
                 batch.variable_features,
-                # batch.v_class,
-                # batch.c_class,
+                batch.v_class,
+                batch.c_class,
             )
             if load:
                 BD = BD.sigmoid()
@@ -201,7 +201,7 @@ optimizer = torch.optim.Adam(PredictModel.parameters(), lr=LEARNING_RATE)
 scheduler = LambdaLR(optimizer, lr_lambda)
 weight_norm = EnergyWeightNorm(TaskName) if not None else 100
 best_val_loss = 99999
-load = True
+load = False
 if load:
     PredictModel.load_state_dict(torch.load(f'./models/{TaskName}.pth'))
     PredictModel.eval()

@@ -14,6 +14,7 @@ from time import time
 from helper import get_a_new2, get_bigraph, get_pattern
 from GCN_class import getPE
 from gp_tools import primal_integral_callback, get_gp_best_objective
+
 # def modify(model, n=0, k=0, fix=0):
 #     # fix 0:no fix 1:随机 2:排序 3: 交集
 #     if model.Status not in [GRB.OPTIMAL, GRB.TIME_LIMIT]:
@@ -57,7 +58,7 @@ from gp_tools import primal_integral_callback, get_gp_best_objective
 #         model.addConstr(gurobipy.LinExpr(coeffs, vars) == constr.RHS, name=f"{constr.ConstrName}_tight")
 
 
-DEVICE = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 random.seed(0)
 torch.manual_seed(0)
 torch.cuda.manual_seed(0)
@@ -77,10 +78,10 @@ else:
     from GCN_class import GNNPolicy_class as GNNPolicy
 
 TaskName = 'CA'
-postion = True
+position = True
 gp_solve = False
 pathstr = f'./models/{model_name}'
-policy = GNNPolicy(TaskName, position=postion).to(DEVICE)
+policy = GNNPolicy(TaskName, position=position).to(DEVICE)
 state = torch.load(pathstr, map_location=DEVICE)
 policy.load_state_dict(state)
 policy.eval()
@@ -128,7 +129,6 @@ log_folder = f'./logs/{TaskName}/{test_task}'
 
 sample_names = sorted(os.listdir(f'./instance/test/{TaskName}'))
 
-
 subop_total = 0
 time_total = 0
 max_subop = -1
@@ -136,7 +136,7 @@ max_time = 0
 ps_int_total = 0
 gp_int_total = 0
 
-ALL_Test = 60 #33
+ALL_Test = 60  # 33
 epoch = 1
 TestNum = round(ALL_Test / epoch)
 
@@ -147,7 +147,8 @@ for e in range(epoch):
         ins_name_to_read = f'./instance/test/{TaskName}/{test_ins_name}'
         # get bipartite graph as input
         v_class_name, c_class_name = get_pattern("./task_config.json", TaskName)
-        A, v_map, v_nodes, c_nodes, b_vars, v_class, c_class, _ = get_bigraph(ins_name_to_read, v_class_name, c_class_name)
+        A, v_map, v_nodes, c_nodes, b_vars, v_class, c_class, _ = get_bigraph(ins_name_to_read, v_class_name,
+                                                                              c_class_name)
         # A, v_map, v_nodes, c_nodes, b_vars = get_a_new2(ins_name_to_read)
         constraint_features = c_nodes.cpu()
         constraint_features[torch.isnan(constraint_features)] = 1  # remove nan value
@@ -157,7 +158,7 @@ for e in range(epoch):
         #     variable_features = postion_get(variable_features)
         edge_indices = A._indices()
         edge_features = A._values().unsqueeze(1)
-        edge_features = torch.ones(edge_features.shape)
+        # edge_features = torch.ones(edge_features.shape)
 
         v_class = utils.convert_class_to_labels(v_class, variable_features.shape[0])
         c_class = utils.convert_class_to_labels(c_class, constraint_features.shape[0])
@@ -294,10 +295,10 @@ for e in range(epoch):
         if m.status in [GRB.OPTIMAL, GRB.TIME_LIMIT]:
             subop = abs(pre_obj - obj) / abs(obj)
             subop_total += subop
-            print(f"ps 最优值：{pre_obj}; subopt: {round(subop, 4)}; subop_total: {round(subop_total/(ins_num+1), 4)}")
+            print(
+                f"ps 最优值：{pre_obj}; subopt: {round(subop, 4)}; subop_total: {round(subop_total / (ins_num + 1), 4)}")
         m.dispose()
         gc.collect()
-
 
 total_num = TestNum * epoch
 results = {
@@ -314,4 +315,3 @@ with open(results_dir + "results.json", "a") as file:
     json.dump(results, file)
 print("avg_subopt： ", results['avg_subopt'])
 print("ps_gap_integral： ", results['ps_gap_integral'])
-

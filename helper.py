@@ -575,12 +575,22 @@ def get_bigraph(ins_name, v_class_name=None, c_class_name=None, couple=0):
             rhs = lhs
 
         summation = 0
+
+        # for v_indx in range(nvars):
+        #     if v_indx in coeff:
+        #         value = coeff[v_indx]
+        #     else:
+        #         value = 0
+        #     indices_spr[0].append(cind)
+        #     indices_spr[1].append(v_indx)
+        #     values_spr.append(value)
+
         for k in coeff:
             v_indx = v_map[k]
             if coeff[k] != 0:
                 indices_spr[0].append(cind)
                 indices_spr[1].append(v_indx)
-                values_spr.append(1)
+                values_spr.append(coeff[k])
             v_nodes[v_indx][2] += 1
             v_nodes[v_indx][1] += coeff[k] / lcons
             v_nodes[v_indx][3] = max(v_nodes[v_indx][3], coeff[k])
