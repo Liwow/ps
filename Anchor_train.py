@@ -16,8 +16,8 @@ torch.backends.cudnn.benchmark = True
 # 4 public datasets, IS, WA, CA, IP
 # train task
 TaskName = "CA"
-edl = True
-position = False
+multimodal = False
+position = True
 warnings.filterwarnings("ignore")
 # set folder
 train_task = f'{TaskName}_train'
@@ -35,7 +35,7 @@ log_file = open(f'{log_save_path}{train_task}_train.log', 'wb')
 
 # set params
 LEARNING_RATE = 0.001
-NB_EPOCHS = 100
+NB_EPOCHS = 50
 BATCH_SIZE = 4
 NUM_WORKERS = 0
 WEIGHT_NORM = 100
@@ -53,13 +53,14 @@ if TaskName == "IP_":
     # Add position embedding for IP model, due to the strong symmetry
     from GCN import GNNPolicy_position as GNNPolicy
     from GCN import GraphDataset_position as GraphDataset
-    position = True
-elif edl:
-    from GCN_edl import GraphDataset
-    from GCN_edl import GNNPolicy_edl as GNNPolicy
-else:
+elif multimodal:
     from GCN import GraphDataset
-    from GCN import GNNPolicy as GNNPolicy
+    from GCN import GNNPolicy_multimodal as GNNPolicy
+else:
+    from GCN_class import GraphDataset_class as GraphDataset
+    from GCN_class import GNNPolicy_class as GNNPolicy
+    # from GCN import GraphDataset
+    # from GCN import GNNPolicy as GNNPolicy
 
 train_data = GraphDataset(train_files, position=position)
 train_loader = torch_geometric.loader.DataLoader(train_data, batch_size=BATCH_SIZE, shuffle=True,
@@ -143,9 +144,11 @@ def train(predict, data_loader, epoch, optimizer=None, weight_norm=1):
                 batch.edge_index,
                 batch.edge_attr,
                 batch.variable_features,
+                batch.v_class,
+                batch.c_class,
             )
-            if not edl:
-                BD = BD[0].sigmoid()
+            if load:
+                BD = BD.sigmoid()
 
             # compute loss
             loss = 0
@@ -170,20 +173,13 @@ def train(predict, data_loader, epoch, optimizer=None, weight_norm=1):
                 n_var = batch.ntvars[ind]
                 pre_sols = BD[index_arrow:index_arrow + n_var].squeeze()[b_vars]
                 index_arrow = index_arrow + n_var
-                if not edl:
-                    pos_loss = -(pre_sols + 1e-8).log()[None, :] * (sols == 1).float()
-                    neg_loss = -(1 - pre_sols + 1e-8).log()[None, :] * (sols == 0).float()
-                    sum_loss = pos_loss + neg_loss
-                    sample_loss = sum_loss * weight[:, None]
-                    loss += sample_loss.sum()
-                    acc = utils.compare(pre_sols, sols, TaskName)
-                else:
-                    sample_loss, kl_loss, pre_sols, uncertainty = predict.edl_loss(pre_sols, sols, weight, loss_type='ce')
-                    # sample_loss, kl_loss, pre_sols, uncertainty = predict.fisher_loss(pre_sols, sols, weight)
-                    loss_edl = sample_loss.sum() + kl_loss * min(0.5, epoch / 20)
-                    loss += loss_edl
-                    acc = utils.compare(pre_sols, sols, TaskName, uncertainty)
+                pos_loss = -(pre_sols + 1e-8).log()[None, :] * (sols == 1).float()
+                neg_loss = -(1 - pre_sols + 1e-8).log()[None, :] * (sols == 0).float()
+                sum_loss = pos_loss + neg_loss
 
+                sample_loss = sum_loss * weight[:, None]
+                loss += sample_loss.sum()
+                acc = utils.compare(pre_sols, sols, TaskName)
                 mean_acc += acc
             if optimizer is not None:
                 loss.backward(retain_graph=True)

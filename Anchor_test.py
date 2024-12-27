@@ -62,26 +62,24 @@ DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 random.seed(0)
 torch.manual_seed(0)
 torch.cuda.manual_seed(0)
-edl = False
-position = False
-gp_solve = False
-# edl, ca
-TaskName = "CA_edl"
-if TaskName == "CA_edl" or TaskName == "CA_fisher":
-    edl = True
+multimodal = False
+TaskName = "CA_anchor"
 model_name = f'{TaskName}.pth'
+if TaskName == "CA_multi":
+    multimodal = True
 # load pretrained model
 if TaskName == "IP":
     # Add position embedding for IP model, due to the strong symmetry
     from GCN import GNNPolicy_position as GNNPolicy, postion_get
-
-    position = True
-elif edl:
-    from GCN_edl import GNNPolicy_edl as GNNPolicy
+elif multimodal:
+    from GCN import GNNPolicy_multimodal as GNNPolicy
 else:
-    from GCN import GNNPolicy as GNNPolicy
+    # from GCN import GNNPolicy as GNNPolicy
+    from GCN_class import GNNPolicy_class as GNNPolicy
 
 TaskName = 'CA'
+position = True
+gp_solve = False
 pathstr = f'./models/{model_name}'
 policy = GNNPolicy(TaskName, position=position).to(DEVICE)
 state = torch.load(pathstr, map_location=DEVICE)
@@ -142,38 +140,39 @@ ALL_Test = 60  # 33
 epoch = 1
 TestNum = round(ALL_Test / epoch)
 
-gp_obj_list = get_gp_best_objective(f'./logs/{TaskName}/{test_task}')
-
 for e in range(epoch):
     for ins_num in range(TestNum):
         t_start = time()
         test_ins_name = sample_names[(0 + e) * TestNum + ins_num]
         ins_name_to_read = f'./instance/test/{TaskName}/{test_ins_name}'
         # get bipartite graph as input
-        A, v_map, v_nodes, c_nodes, b_vars = get_a_new2(ins_name_to_read)
+        v_class_name, c_class_name = get_pattern("./task_config.json", TaskName)
+        A, v_map, v_nodes, c_nodes, b_vars, v_class, c_class, _ = get_bigraph(ins_name_to_read, v_class_name,
+                                                                              c_class_name)
+        # A, v_map, v_nodes, c_nodes, b_vars = get_a_new2(ins_name_to_read)
         constraint_features = c_nodes.cpu()
         constraint_features[torch.isnan(constraint_features)] = 1  # remove nan value
-        if edl:
-            variable_features = getPE(v_nodes, position)
-        else:
-            variable_features = v_nodes
+        variable_features = getPE(v_nodes, position)
+        # constraint_features = torch.concat([constraint_features, torch.randn(constraint_features.shape(0), 1)], dim=1)
 
         # if TaskName == "IP":
         #     variable_features = postion_get(variable_features)
         edge_indices = A._indices()
-        edge_features = A._values().unsqueeze(1).float()
+        edge_features = A._values().unsqueeze(1)
         # edge_features = torch.ones(edge_features.shape)
+
+        v_class = utils.convert_class_to_labels(v_class, variable_features.shape[0])
+        c_class = utils.convert_class_to_labels(c_class, constraint_features.shape[0])
+
         # prediction
         BD = policy(
             constraint_features.to(DEVICE),
             edge_indices.to(DEVICE),
             edge_features.to(DEVICE),
             variable_features.to(DEVICE),
-        )
-        if edl:
-            BD = policy.get_p(BD)
-        BD = BD[0].cpu().squeeze()
-
+            torch.LongTensor(v_class).to(DEVICE),
+            torch.LongTensor(c_class).to(DEVICE),
+        ).cpu().squeeze()
         pred = BD.detach().numpy()
         rounding_errors = np.abs(np.round(pred) - pred)
         m = 0.1
@@ -243,7 +242,7 @@ for e in range(epoch):
             gp_int_total += primal_integral
             print("gp_int_total：", gp_int_total)
         else:
-            obj = gp_obj_list[(0 + e) * TestNum + ins_num]
+            obj = get_gp_best_objective(f'./logs/{TaskName}/{test_task}')[(0 + e) * TestNum + ins_num]
         print("gurobi 最优解：", obj)
         m.reset()
         m.Params.TimeLimit = 800
@@ -295,10 +294,10 @@ for e in range(epoch):
         if max_time <= t:
             max_time = t
         if m.status in [GRB.OPTIMAL, GRB.TIME_LIMIT]:
-            subop = abs(pre_obj - obj) / abs(obj + 1e-8)
+            subop = abs(pre_obj - obj) / abs(obj)
             subop_total += subop
             print(
-                f"ps 最优值：{pre_obj}; subopt: {round(subop, 4)}; subop_avg: {round(subop_total / (ins_num + 1), 4)}")
+                f"ps 最优值：{pre_obj}; subopt: {round(subop, 4)}; subop_total: {round(subop_total / (ins_num + 1), 4)}")
         m.dispose()
         gc.collect()
 

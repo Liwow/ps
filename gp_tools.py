@@ -307,9 +307,9 @@ def search(m, scores, delta):
 def get_gp_best_objective(log_folder):
     best_objectives = []
     pattern = r"Best objective ([\d.e+-]+)"  # 正则表达式匹配 "Best objective " 后面的值
-
+    filenames = sorted(os.listdir(log_folder))
     # 遍历文件夹中的所有文件
-    for filename in os.listdir(log_folder):
+    for filename in filenames:
         filepath = os.path.join(log_folder, filename)
 
         # 确保只处理文件

@@ -16,7 +16,7 @@ torch.backends.cudnn.benchmark = True
 # 4 public datasets, IS, WA, CA, IP
 # train task
 TaskName = "CA"
-edl = True
+multimodal = False
 position = False
 warnings.filterwarnings("ignore")
 # set folder
@@ -54,12 +54,13 @@ if TaskName == "IP_":
     from GCN import GNNPolicy_position as GNNPolicy
     from GCN import GraphDataset_position as GraphDataset
     position = True
-elif edl:
-    from GCN_edl import GraphDataset
-    from GCN_edl import GNNPolicy_edl as GNNPolicy
-else:
+elif multimodal:
     from GCN import GraphDataset
-    from GCN import GNNPolicy as GNNPolicy
+    from GCN import GNNPolicy_multimodal as GNNPolicy
+else:
+    from EGAT_models import SpGAT as EGATPolicy
+    from EGAT_models import EgatDataset as GraphDataset
+    # from GCN import GraphDataset
 
 train_data = GraphDataset(train_files, position=position)
 train_loader = torch_geometric.loader.DataLoader(train_data, batch_size=BATCH_SIZE, shuffle=True,
@@ -67,8 +68,14 @@ train_loader = torch_geometric.loader.DataLoader(train_data, batch_size=BATCH_SI
 valid_data = GraphDataset(valid_files, position=position)
 valid_loader = torch_geometric.loader.DataLoader(valid_data, batch_size=BATCH_SIZE, shuffle=False,
                                                  num_workers=NUM_WORKERS)
-
-PredictModel = GNNPolicy(TaskName, position=position).to(DEVICE)
+nfeat = 7 if not position else 18
+PredictModel = EGATPolicy(nfeat=nfeat,  # Feature dimension
+                          nhid=64,  # Feature dimension of each hidden layer
+                          nclass=2,  # int(data_solution[0].max()) + 1, Number of classes
+                          dropout=0.3,  # Dropout
+                          nheads=4,  # Number of heads
+                          alpha=0.2)  # LeakyReLU alpha coefficient.to(DEVICE)
+PredictModel.to(DEVICE)
 
 
 def lr_lambda(epoch):
@@ -137,15 +144,14 @@ def train(predict, data_loader, epoch, optimizer=None, weight_norm=1):
 
             # Compute the logits (i.e. pre-softmax activations) according to the policy on the concatenated graphs
             batch.constraint_features[torch.isinf(batch.constraint_features)] = 10  # remove nan value
+
             # predict the binary distribution, BD
             BD = predict(
-                batch.constraint_features,
-                batch.edge_index,
+                batch.features,
+                batch.edge_A,
+                batch.edge_B,
                 batch.edge_attr,
-                batch.variable_features,
-            )
-            if not edl:
-                BD = BD[0].sigmoid()
+            )[0]
 
             # compute loss
             loss = 0
@@ -170,20 +176,13 @@ def train(predict, data_loader, epoch, optimizer=None, weight_norm=1):
                 n_var = batch.ntvars[ind]
                 pre_sols = BD[index_arrow:index_arrow + n_var].squeeze()[b_vars]
                 index_arrow = index_arrow + n_var
-                if not edl:
-                    pos_loss = -(pre_sols + 1e-8).log()[None, :] * (sols == 1).float()
-                    neg_loss = -(1 - pre_sols + 1e-8).log()[None, :] * (sols == 0).float()
-                    sum_loss = pos_loss + neg_loss
-                    sample_loss = sum_loss * weight[:, None]
-                    loss += sample_loss.sum()
-                    acc = utils.compare(pre_sols, sols, TaskName)
-                else:
-                    sample_loss, kl_loss, pre_sols, uncertainty = predict.edl_loss(pre_sols, sols, weight, loss_type='ce')
-                    # sample_loss, kl_loss, pre_sols, uncertainty = predict.fisher_loss(pre_sols, sols, weight)
-                    loss_edl = sample_loss.sum() + kl_loss * min(0.5, epoch / 20)
-                    loss += loss_edl
-                    acc = utils.compare(pre_sols, sols, TaskName, uncertainty)
+                pos_loss = -(pre_sols + 1e-8).log()[None, :] * (sols == 1).float()
+                neg_loss = -(1 - pre_sols + 1e-8).log()[None, :] * (sols == 0).float()
+                sum_loss = pos_loss + neg_loss
 
+                sample_loss = sum_loss * weight[:, None]
+                loss += sample_loss.sum()
+                acc = utils.compare(pre_sols, sols, TaskName)
                 mean_acc += acc
             if optimizer is not None:
                 loss.backward(retain_graph=True)

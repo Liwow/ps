@@ -7,7 +7,7 @@ import torch.nn as nn
 import torch_geometric
 import pickle
 import numpy as np
-import math
+from GCN import getPE, SELayerGraph, BipartiteGraphConvolution
 import pyscipopt as scip
 import utils
 
@@ -83,23 +83,6 @@ class BipartiteGraphConvolution(torch_geometric.nn.MessagePassing):
         )
 
         return output
-
-
-class SELayerGraph(nn.Module):
-    def __init__(self, feature_dim, reduction=16):
-        super(SELayerGraph, self).__init__()
-        self.fc = nn.Sequential(
-            nn.Linear(feature_dim, feature_dim // reduction, bias=False),
-            nn.ReLU(inplace=True),
-            nn.Linear(feature_dim // reduction, feature_dim, bias=False),
-            nn.Sigmoid()
-        )
-
-    def forward(self, x):
-        # x: (batch_size, num_nodes, feature_dim)
-        mean = x.mean(dim=0, keepdim=True)  # 对节点的特征均值化 (batch_size, feature_dim)
-        weights = self.fc(mean)  # 通过全连接网络生成权重
-        return x * weights
 
 
 class BipartiteNodeData(torch_geometric.data.Data):
@@ -330,6 +313,7 @@ class GraphDataset_class(torch_geometric.data.Dataset):
         edge_features = A._values().unsqueeze(1)
 
         variable_features = getPE(variable_features, self.position)
+        # constraint_features = torch.concat([constraint_features, torch.randn(constraint_features.shape(0), 1)], dim=1)
 
         constraint_features[torch.isnan(constraint_features)] = 1
 
@@ -622,24 +606,3 @@ class Anchor2(torch.nn.Module):
         return v_updates, c_updates
 
 
-def getPE(var_fea, p=True, d_model=12):
-    lens = var_fea.shape[0]
-    if p:
-        d_model = 12  # max length 4095
-        position = torch.arange(0, lens, 1)
-        pe = torch.zeros(lens, d_model)
-        for i in range(len(pe)):
-            binary = str(bin(position[i]).replace('0b', ''))
-            for j in range(len(binary)):
-                pe[i][j] = int(binary[-(j + 1)])
-        # position = torch.arange(0, lens).unsqueeze(1)  # 位置索引 (lens, 1)
-        # div_term = torch.exp(-torch.arange(0, d_model, 2) * math.log(10000.0) / d_model)  # 频率分量 (d_model/2, )
-        # pe = torch.zeros(lens, d_model)  # 初始化位置编码 (lens, d_model)
-        # pe[:, 0::2] = torch.sin(position * div_term)  # 偶数列: sin
-        # pe[:, 1::2] = torch.cos(position * div_term)  # 奇数列: cos
-
-        var_fea = torch.concat([var_fea, pe], dim=1)
-    # else:
-    #     random_features = torch.randn(lens, 1)
-    #     var_fea = torch.concat([var_fea, random_features], dim=1)
-    return var_fea

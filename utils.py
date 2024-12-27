@@ -134,15 +134,21 @@ def test_hyperparam(task):
         return 14, 12, 9
 
 
-def compare(pre_sol, sols, task):
+def compare(pre_sol, sols, task, u=None):
     # m 1 n 0
     n, m, delta = test_hyperparam(task)
+    u0 = 0.5
     sorted_indices = torch.argsort(pre_sol, descending=True)  # 降序排序
 
     pre_sol_rounded = torch.round(pre_sol)
 
     top_m_indices = sorted_indices[:m] if m > 0 else []
     bottom_n_indices = sorted_indices[-n:] if n > 0 else []
+    if u is not None:
+        top_m_indices = [idx for idx in top_m_indices if u[idx] < u0]
+        bottom_n_indices = [idx for idx in bottom_n_indices if u[idx] < u0]
+        # if len(top_m_indices) < m or len(bottom_n_indices) < n:
+        #     print("u works")
     best_radio = 0
     best_m_ratio = 0
     best_n_ratio = 0

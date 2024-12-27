@@ -189,6 +189,7 @@ class GraphDataset(torch_geometric.data.Dataset):
     def __init__(self, sample_files, position=False):
         super().__init__(root=None, transform=None, pre_transform=None)
         self.sample_files = sample_files
+        self.position = position
 
     def len(self):
         return len(self.sample_files)
@@ -370,195 +371,195 @@ class GNNPolicy_position(torch.nn.Module):
 
 
 # GNN merged a text by cross_attention
-class GNNPolicy_multimodal(torch.nn.Module):
-    def __init__(self, TaskName=None):
-        super().__init__()
-        emb_size = 64
-        cons_nfeats = 4
-        edge_nfeats = 1
-        var_nfeats = 6
-        path = "../../local_models/t5-base"
-        self.text = utils.text_setting(TaskName)
-        self.cross_attention = torch.nn.MultiheadAttention(emb_size, num_heads=4, batch_first=True)
-        self.tokenizer = T5Tokenizer.from_pretrained(path, legacy=False)
-        self.text_encoder = T5EncoderModel.from_pretrained(path).to("cuda")
-        self.semantic_proj = torch.nn.Linear(768, 64)
-
-        # CONSTRAINT EMBEDDING
-        self.cons_embedding = torch.nn.Sequential(
-            torch.nn.LayerNorm(cons_nfeats),
-            torch.nn.Linear(cons_nfeats, emb_size),
-            torch.nn.ReLU(),
-            torch.nn.Linear(emb_size, emb_size),
-            torch.nn.ReLU(),
-        )
-
-        # EDGE EMBEDDING
-        self.edge_embedding = torch.nn.Sequential(
-            torch.nn.LayerNorm(edge_nfeats),
-        )
-
-        # VARIABLE EMBEDDING
-        self.var_embedding = torch.nn.Sequential(
-            torch.nn.LayerNorm(var_nfeats),
-            torch.nn.Linear(var_nfeats, emb_size),
-            torch.nn.ReLU(),
-            torch.nn.Linear(emb_size, emb_size),
-            torch.nn.ReLU(),
-        )
-
-        self.conv_v_to_c = BipartiteGraphConvolution()
-        self.conv_c_to_v = BipartiteGraphConvolution()
-
-        # self.cross_attention = torch.nn.MultiheadAttention(embed_dim=64, num_heads=8, batch_first=True)
-
-        self.conv_v_to_c2 = BipartiteGraphConvolution()
-        self.conv_c_to_v2 = BipartiteGraphConvolution()
-
-        self.output_module = torch.nn.Sequential(
-            torch.nn.Linear(emb_size, emb_size),
-            torch.nn.ReLU(),
-            torch.nn.Linear(emb_size, 1, bias=False),
-        )
-
-    def forward(
-            self, constraint_features, edge_indices, edge_features, variable_features
-    ):
-        reversed_edge_indices = torch.stack([edge_indices[1], edge_indices[0]], dim=0)
-
-        # First step: linear embedding layers to a common dimension (64)
-        constraint_features = self.cons_embedding(constraint_features)
-        edge_features = self.edge_embedding(edge_features)
-        variable_features = self.var_embedding(variable_features)
-
-        # Two half convolutions
-        constraint_features = self.conv_v_to_c(
-            variable_features, reversed_edge_indices, edge_features, constraint_features
-        )
-        variable_features = self.conv_c_to_v(
-            constraint_features, edge_indices, edge_features, variable_features
-        )
-
-        constraint_features = self.conv_v_to_c2(
-            variable_features, reversed_edge_indices, edge_features, constraint_features
-        )
-        variable_features = self.conv_c_to_v2(
-            constraint_features, edge_indices, edge_features, variable_features
-        )
-
-        # text-embedding
-        text_tokenizer = self.tokenizer(self.text, return_tensors="pt").to("cuda")
-        text_embedding = self.text_encoder(**text_tokenizer).last_hidden_state
-        text_embedding = self.semantic_proj(text_embedding)
-        text_embedding = text_embedding.view(-1, text_embedding.size(2))
-
-        # merge
-        variable_features = self.cross_attention(variable_features, text_embedding, text_embedding)[0]
-
-        # A final MLP on the variable features
-        output = self.output_module(variable_features).squeeze(-1)
-
-        return output
+# class GNNPolicy_multimodal(torch.nn.Module):
+#     def __init__(self, TaskName=None):
+#         super().__init__()
+#         emb_size = 64
+#         cons_nfeats = 4
+#         edge_nfeats = 1
+#         var_nfeats = 6
+#         path = "../../local_models/t5-base"
+#         self.text = utils.text_setting(TaskName)
+#         self.cross_attention = torch.nn.MultiheadAttention(emb_size, num_heads=4, batch_first=True)
+#         self.tokenizer = T5Tokenizer.from_pretrained(path, legacy=False)
+#         self.text_encoder = T5EncoderModel.from_pretrained(path).to("cuda")
+#         self.semantic_proj = torch.nn.Linear(768, 64)
+#
+#         # CONSTRAINT EMBEDDING
+#         self.cons_embedding = torch.nn.Sequential(
+#             torch.nn.LayerNorm(cons_nfeats),
+#             torch.nn.Linear(cons_nfeats, emb_size),
+#             torch.nn.ReLU(),
+#             torch.nn.Linear(emb_size, emb_size),
+#             torch.nn.ReLU(),
+#         )
+#
+#         # EDGE EMBEDDING
+#         self.edge_embedding = torch.nn.Sequential(
+#             torch.nn.LayerNorm(edge_nfeats),
+#         )
+#
+#         # VARIABLE EMBEDDING
+#         self.var_embedding = torch.nn.Sequential(
+#             torch.nn.LayerNorm(var_nfeats),
+#             torch.nn.Linear(var_nfeats, emb_size),
+#             torch.nn.ReLU(),
+#             torch.nn.Linear(emb_size, emb_size),
+#             torch.nn.ReLU(),
+#         )
+#
+#         self.conv_v_to_c = BipartiteGraphConvolution()
+#         self.conv_c_to_v = BipartiteGraphConvolution()
+#
+#         # self.cross_attention = torch.nn.MultiheadAttention(embed_dim=64, num_heads=8, batch_first=True)
+#
+#         self.conv_v_to_c2 = BipartiteGraphConvolution()
+#         self.conv_c_to_v2 = BipartiteGraphConvolution()
+#
+#         self.output_module = torch.nn.Sequential(
+#             torch.nn.Linear(emb_size, emb_size),
+#             torch.nn.ReLU(),
+#             torch.nn.Linear(emb_size, 1, bias=False),
+#         )
+#
+#     def forward(
+#             self, constraint_features, edge_indices, edge_features, variable_features
+#     ):
+#         reversed_edge_indices = torch.stack([edge_indices[1], edge_indices[0]], dim=0)
+#
+#         # First step: linear embedding layers to a common dimension (64)
+#         constraint_features = self.cons_embedding(constraint_features)
+#         edge_features = self.edge_embedding(edge_features)
+#         variable_features = self.var_embedding(variable_features)
+#
+#         # Two half convolutions
+#         constraint_features = self.conv_v_to_c(
+#             variable_features, reversed_edge_indices, edge_features, constraint_features
+#         )
+#         variable_features = self.conv_c_to_v(
+#             constraint_features, edge_indices, edge_features, variable_features
+#         )
+#
+#         constraint_features = self.conv_v_to_c2(
+#             variable_features, reversed_edge_indices, edge_features, constraint_features
+#         )
+#         variable_features = self.conv_c_to_v2(
+#             constraint_features, edge_indices, edge_features, variable_features
+#         )
+#
+#         # text-embedding
+#         text_tokenizer = self.tokenizer(self.text, return_tensors="pt").to("cuda")
+#         text_embedding = self.text_encoder(**text_tokenizer).last_hidden_state
+#         text_embedding = self.semantic_proj(text_embedding)
+#         text_embedding = text_embedding.view(-1, text_embedding.size(2))
+#
+#         # merge
+#         variable_features = self.cross_attention(variable_features, text_embedding, text_embedding)[0]
+#
+#         # A final MLP on the variable features
+#         output = self.output_module(variable_features).squeeze(-1)
+#
+#         return output
 
 
 # GNN with random features or text features in v and c
-class GNNPolicy_features(torch.nn.Module):
-    def __init__(self, TaskName=None):
-        super().__init__()
-        self.text_size = 64
-        emb_size = 64
-        cons_nfeats = 4
-        edge_nfeats = 1
-        var_nfeats = 6
-        self.is_random = True
-        path = "../../local_models/t5-base"
-        # todo text数据集获取方法
-        self.text = utils.text_setting(TaskName)
-        self.cross_attention = torch.nn.MultiheadAttention(emb_size, num_heads=4, batch_first=True)
-        self.tokenizer = T5Tokenizer.from_pretrained(path, legacy=False)
-        self.text_encoder = T5EncoderModel.from_pretrained(path).to("cuda")
-        self.semantic_proj = torch.nn.Linear(768, 64)
-
-        # CONSTRAINT EMBEDDING
-        self.cons_embedding = torch.nn.Sequential(
-            torch.nn.LayerNorm(cons_nfeats),
-            torch.nn.Linear(cons_nfeats, emb_size),
-            torch.nn.ReLU(),
-            torch.nn.Linear(emb_size, emb_size),
-            torch.nn.ReLU(),
-        )
-
-        # EDGE EMBEDDING
-        self.edge_embedding = torch.nn.Sequential(
-            torch.nn.LayerNorm(edge_nfeats),
-        )
-
-        # VARIABLE EMBEDDING
-        self.var_embedding = torch.nn.Sequential(
-            torch.nn.LayerNorm(var_nfeats),
-            torch.nn.Linear(var_nfeats, emb_size),
-            torch.nn.ReLU(),
-            torch.nn.Linear(emb_size, emb_size),
-            torch.nn.ReLU(),
-        )
-
-        self.conv_v_to_c = BipartiteGraphConvolution()
-        self.conv_c_to_v = BipartiteGraphConvolution()
-
-        # self.cross_attention = torch.nn.MultiheadAttention(embed_dim=64, num_heads=8, batch_first=True)
-
-        self.conv_v_to_c2 = BipartiteGraphConvolution()
-        self.conv_c_to_v2 = BipartiteGraphConvolution()
-
-        self.output_module = torch.nn.Sequential(
-            torch.nn.Linear(emb_size, emb_size),
-            torch.nn.ReLU(),
-            torch.nn.Linear(emb_size, 1, bias=False),
-        )
-
-    def forward(
-            self, constraint_features, edge_indices, edge_features, variable_features
-    ):
-        num_con = constraint_features.shape[0]
-        num_var = variable_features.shape[0]
-        if self.is_random:
-            # todo 需要解决增加的维度远大于原特征维度的问题
-            random_features_con = torch.randn(num_con, self.text_size)
-            random_features_var = torch.randn(num_var, self.text_size)
-            constraint_features = torch.cat((constraint_features, random_features_con), dim=1)
-            variable_features = torch.cat((variable_features, random_features_var), dim=1)
-        else:
-            # todo 批次的增加text features
-            text_features_con = torch.randn(num_con, self.text_size)
-            text_features_var = torch.randn(num_var, self.text_size)
-            constraint_features = torch.cat((constraint_features, text_features_con), dim=1)
-            variable_features = torch.cat((variable_features, text_features_var), dim=1)
-        reversed_edge_indices = torch.stack([edge_indices[1], edge_indices[0]], dim=0)
-
-        # First step: linear embedding layers to a common dimension (64)
-        constraint_features = self.cons_embedding(constraint_features)
-        edge_features = self.edge_embedding(edge_features)
-        variable_features = self.var_embedding(variable_features)
-
-        # Two half convolutions
-        constraint_features = self.conv_v_to_c(
-            variable_features, reversed_edge_indices, edge_features, constraint_features
-        )
-        variable_features = self.conv_c_to_v(
-            constraint_features, edge_indices, edge_features, variable_features
-        )
-
-        constraint_features = self.conv_v_to_c2(
-            variable_features, reversed_edge_indices, edge_features, constraint_features
-        )
-        variable_features = self.conv_c_to_v2(
-            constraint_features, edge_indices, edge_features, variable_features
-        )
-
-        # A final MLP on the variable features
-        output = self.output_module(variable_features).squeeze(-1)
-
-        return output
+# class GNNPolicy_features(torch.nn.Module):
+#     def __init__(self, TaskName=None):
+#         super().__init__()
+#         self.text_size = 64
+#         emb_size = 64
+#         cons_nfeats = 4
+#         edge_nfeats = 1
+#         var_nfeats = 6
+#         self.is_random = True
+#         path = "../../local_models/t5-base"
+#         # todo text数据集获取方法
+#         self.text = utils.text_setting(TaskName)
+#         self.cross_attention = torch.nn.MultiheadAttention(emb_size, num_heads=4, batch_first=True)
+#         self.tokenizer = T5Tokenizer.from_pretrained(path, legacy=False)
+#         self.text_encoder = T5EncoderModel.from_pretrained(path).to("cuda")
+#         self.semantic_proj = torch.nn.Linear(768, 64)
+#
+#         # CONSTRAINT EMBEDDING
+#         self.cons_embedding = torch.nn.Sequential(
+#             torch.nn.LayerNorm(cons_nfeats),
+#             torch.nn.Linear(cons_nfeats, emb_size),
+#             torch.nn.ReLU(),
+#             torch.nn.Linear(emb_size, emb_size),
+#             torch.nn.ReLU(),
+#         )
+#
+#         # EDGE EMBEDDING
+#         self.edge_embedding = torch.nn.Sequential(
+#             torch.nn.LayerNorm(edge_nfeats),
+#         )
+#
+#         # VARIABLE EMBEDDING
+#         self.var_embedding = torch.nn.Sequential(
+#             torch.nn.LayerNorm(var_nfeats),
+#             torch.nn.Linear(var_nfeats, emb_size),
+#             torch.nn.ReLU(),
+#             torch.nn.Linear(emb_size, emb_size),
+#             torch.nn.ReLU(),
+#         )
+#
+#         self.conv_v_to_c = BipartiteGraphConvolution()
+#         self.conv_c_to_v = BipartiteGraphConvolution()
+#
+#         # self.cross_attention = torch.nn.MultiheadAttention(embed_dim=64, num_heads=8, batch_first=True)
+#
+#         self.conv_v_to_c2 = BipartiteGraphConvolution()
+#         self.conv_c_to_v2 = BipartiteGraphConvolution()
+#
+#         self.output_module = torch.nn.Sequential(
+#             torch.nn.Linear(emb_size, emb_size),
+#             torch.nn.ReLU(),
+#             torch.nn.Linear(emb_size, 1, bias=False),
+#         )
+#
+#     def forward(
+#             self, constraint_features, edge_indices, edge_features, variable_features
+#     ):
+#         num_con = constraint_features.shape[0]
+#         num_var = variable_features.shape[0]
+#         if self.is_random:
+#             # todo 需要解决增加的维度远大于原特征维度的问题
+#             random_features_con = torch.randn(num_con, self.text_size)
+#             random_features_var = torch.randn(num_var, self.text_size)
+#             constraint_features = torch.cat((constraint_features, random_features_con), dim=1)
+#             variable_features = torch.cat((variable_features, random_features_var), dim=1)
+#         else:
+#             # todo 批次的增加text features
+#             text_features_con = torch.randn(num_con, self.text_size)
+#             text_features_var = torch.randn(num_var, self.text_size)
+#             constraint_features = torch.cat((constraint_features, text_features_con), dim=1)
+#             variable_features = torch.cat((variable_features, text_features_var), dim=1)
+#         reversed_edge_indices = torch.stack([edge_indices[1], edge_indices[0]], dim=0)
+#
+#         # First step: linear embedding layers to a common dimension (64)
+#         constraint_features = self.cons_embedding(constraint_features)
+#         edge_features = self.edge_embedding(edge_features)
+#         variable_features = self.var_embedding(variable_features)
+#
+#         # Two half convolutions
+#         constraint_features = self.conv_v_to_c(
+#             variable_features, reversed_edge_indices, edge_features, constraint_features
+#         )
+#         variable_features = self.conv_c_to_v(
+#             constraint_features, edge_indices, edge_features, variable_features
+#         )
+#
+#         constraint_features = self.conv_v_to_c2(
+#             variable_features, reversed_edge_indices, edge_features, constraint_features
+#         )
+#         variable_features = self.conv_c_to_v2(
+#             constraint_features, edge_indices, edge_features, variable_features
+#         )
+#
+#         # A final MLP on the variable features
+#         output = self.output_module(variable_features).squeeze(-1)
+#
+#         return output
 
 
 # GNN predict constraints and variable
@@ -1134,6 +1135,28 @@ def postion_get(variable_features):
     v = torch.concat([variable_features, position_feature], dim=1).to(DEVICE)
     return v
 
+
+def getPE(var_fea, p=True, d_model=12):
+    lens = var_fea.shape[0]
+    if p:
+        d_model = 12  # max length 4095
+        position = torch.arange(0, lens, 1)
+        pe = torch.zeros(lens, d_model)
+        for i in range(len(pe)):
+            binary = str(bin(position[i]).replace('0b', ''))
+            for j in range(len(binary)):
+                pe[i][j] = int(binary[-(j + 1)])
+        # position = torch.arange(0, lens).unsqueeze(1)  # 位置索引 (lens, 1)
+        # div_term = torch.exp(-torch.arange(0, d_model, 2) * math.log(10000.0) / d_model)  # 频率分量 (d_model/2, )
+        # pe = torch.zeros(lens, d_model)  # 初始化位置编码 (lens, d_model)
+        # pe[:, 0::2] = torch.sin(position * div_term)  # 偶数列: sin
+        # pe[:, 1::2] = torch.cos(position * div_term)  # 奇数列: cos
+
+        var_fea = torch.concat([var_fea, pe], dim=1)
+    else:
+        random_features = torch.randn(lens, 1)
+        var_fea = torch.concat([var_fea, random_features], dim=1)
+    return var_fea
 
 def Loss_CV(mip, sol_per, con_per):
     lamda = 1
