@@ -62,7 +62,7 @@ DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 random.seed(0)
 torch.manual_seed(0)
 torch.cuda.manual_seed(0)
-multimodal = False
+position = False
 TaskName = "CA_egat"
 model_name = f'{TaskName}.pth'
 if TaskName == "CA_multi":
@@ -71,17 +71,16 @@ if TaskName == "CA_multi":
 if TaskName == "IP":
     # Add position embedding for IP model, due to the strong symmetry
     from GCN import GNNPolicy_position as GNNPolicy, postion_get
-elif multimodal:
-    from GCN import GNNPolicy_multimodal as GNNPolicy
+    position = True
 else:
     # from GCN import GNNPolicy as GNNPolicy
     from EGAT_models import SpGAT as EGATPolicy
 
 TaskName = 'CA'
-position = False
 gp_solve = False
 pathstr = f'./models/{model_name}'
-policy = EGATPolicy(nfeat=7,  # Feature dimension
+nfeat = 7 if not position else 18
+policy = EGATPolicy(nfeat=nfeat,  # Feature dimension
                     nhid=64,  # Feature dimension of each hidden layer
                     nclass=2,  # int(data_solution[0].max()) + 1, Number of classes
                     dropout=0.5,  # Dropout
@@ -153,12 +152,11 @@ for e in range(epoch):
         ins_name_to_read = f'./instance/test/{TaskName}/{test_ins_name}'
         # get bipartite graph as input
         v_class_name, c_class_name = get_pattern("./task_config.json", TaskName)
-        A, v_map, v_nodes, c_nodes, b_vars, v_class, c_class, _ = get_bigraph(ins_name_to_read, v_class_name,
-                                                                              c_class_name)
-        # A, v_map, v_nodes, c_nodes, b_vars = get_a_new2(ins_name_to_read)
+        A, v_map, v_nodes, c_nodes, b_vars = get_a_new2(ins_name_to_read)
         constraint_features = c_nodes.cpu()
         constraint_features[torch.isnan(constraint_features)] = 1  # remove nan value
         variable_features = getPE(v_nodes, position)
+        constraint_features = torch.concat([constraint_features, torch.randn(constraint_features.shape[0], 1)], dim=1)
         # if TaskName == "IP":
         #     variable_features = postion_get(variable_features)
         edge_indices = A._indices()

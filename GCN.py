@@ -523,13 +523,11 @@ class GNNPolicy_position(torch.nn.Module):
 #         num_con = constraint_features.shape[0]
 #         num_var = variable_features.shape[0]
 #         if self.is_random:
-#             # todo 需要解决增加的维度远大于原特征维度的问题
 #             random_features_con = torch.randn(num_con, self.text_size)
 #             random_features_var = torch.randn(num_var, self.text_size)
 #             constraint_features = torch.cat((constraint_features, random_features_con), dim=1)
 #             variable_features = torch.cat((variable_features, random_features_var), dim=1)
 #         else:
-#             # todo 批次的增加text features
 #             text_features_con = torch.randn(num_con, self.text_size)
 #             text_features_var = torch.randn(num_var, self.text_size)
 #             constraint_features = torch.cat((constraint_features, text_features_con), dim=1)

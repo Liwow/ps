@@ -178,8 +178,8 @@ def train(predict, data_loader, epoch, optimizer=None, weight_norm=1):
                     loss += sample_loss.sum()
                     acc = utils.compare(pre_sols, sols, TaskName)
                 else:
-                    sample_loss, kl_loss, pre_sols, uncertainty = predict.edl_loss(pre_sols, sols, weight, loss_type='ce')
-                    # sample_loss, kl_loss, pre_sols, uncertainty = predict.fisher_loss(pre_sols, sols, weight)
+                    # sample_loss, kl_loss, pre_sols, uncertainty = predict.edl_loss(pre_sols, sols, weight, loss_type='ce')
+                    sample_loss, kl_loss, pre_sols, uncertainty = predict.fisher_loss(pre_sols, sols, weight)
                     loss_edl = sample_loss.sum() + kl_loss * min(0.5, epoch / 20)
                     loss += loss_edl
                     acc = utils.compare(pre_sols, sols, TaskName, uncertainty)
