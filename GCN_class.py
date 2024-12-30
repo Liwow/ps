@@ -11,7 +11,7 @@ from GCN import getPE, SELayerGraph, BipartiteGraphConvolution
 import pyscipopt as scip
 import utils
 
-DEVICE = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+DEVICE = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
 
 
 class BipartiteGraphConvolution(torch_geometric.nn.MessagePassing):
@@ -132,9 +132,9 @@ class GNNPolicy_class(torch.nn.Module):
     def __init__(self, TaskName, position=False):
         super().__init__()
         emb_size = 64
-        cons_nfeats = 4
+        cons_nfeats = 5
         edge_nfeats = 1
-        var_nfeats = 6 if not position else 18
+        var_nfeats = 7 if not position else 18
         self.temperature = 0.6
         self.dropout = nn.Dropout(p=0.3)
         self.se_con = SELayerGraph(emb_size)
@@ -185,7 +185,7 @@ class GNNPolicy_class(torch.nn.Module):
         self.anchor_gnn = AnchorGNN(TaskName, emb_size).to(DEVICE)
 
     def forward(
-            self, constraint_features, edge_indices, edge_features, variable_features, v_class, c_class, c_mask=None
+            self, constraint_features, edge_indices, edge_features, variable_features, v_class, c_class, get_logits=False, c_mask=None
     ):
         reversed_edge_indices = torch.stack([edge_indices[1], edge_indices[0]], dim=0)
 
@@ -221,8 +221,10 @@ class GNNPolicy_class(torch.nn.Module):
         )
 
         var_output = torch.sigmoid(self.var_mlp(variable_features).squeeze(-1) / self.temperature)
-
-        return var_output
+        if get_logits:
+            return variable_features, constraint_features, var_output
+        else:
+            return var_output
 
 
 class GraphDataset_class(torch_geometric.data.Dataset):
@@ -313,7 +315,7 @@ class GraphDataset_class(torch_geometric.data.Dataset):
         edge_features = A._values().unsqueeze(1)
 
         variable_features = getPE(variable_features, self.position)
-        # constraint_features = torch.concat([constraint_features, torch.randn(constraint_features.shape(0), 1)], dim=1)
+        constraint_features = torch.concat([constraint_features, torch.randn(constraint_features.shape[0], 1)], dim=1)
 
         constraint_features[torch.isnan(constraint_features)] = 1
 

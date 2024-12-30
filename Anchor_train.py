@@ -6,18 +6,20 @@ import time
 import warnings
 from torch.optim.lr_scheduler import LambdaLR
 from tqdm import tqdm
-
 import utils
-
+seed = 3042
+random.seed(seed)
+torch.manual_seed(seed)
+torch.cuda.manual_seed(seed)
 torch.backends.cudnn.enabled = True
 torch.backends.cudnn.benchmark = True
 # this file is to train a predict model. given a instance's bipartite graph as input, the model predict the binary distribution.
 
 # 4 public datasets, IS, WA, CA, IP
 # train task
-TaskName = "CA"
+TaskName = "WA"
 multimodal = False
-position = True
+position = False
 warnings.filterwarnings("ignore")
 # set folder
 train_task = f'{TaskName}_train'
@@ -35,14 +37,14 @@ log_file = open(f'{log_save_path}{train_task}_train.log', 'wb')
 
 # set params
 LEARNING_RATE = 0.001
-NB_EPOCHS = 50
-BATCH_SIZE = 4
+NB_EPOCHS = 500
+BATCH_SIZE = 2
 NUM_WORKERS = 0
 WEIGHT_NORM = 100
 
 # dataset task
-TaskName = "CA"
-DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+TaskName = "WA"
+DEVICE = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 DIR_BG = f'./dataset/{TaskName}/BG'
 DIR_SOL = f'./dataset/{TaskName}/solution'
 sample_names = os.listdir(DIR_BG)
@@ -73,7 +75,7 @@ PredictModel = GNNPolicy(TaskName, position=position).to(DEVICE)
 
 
 def lr_lambda(epoch):
-    return 0.98 ** ((epoch + 1) // 5)
+    return 0.95 ** ((epoch + 1) // 5)
 
 
 def EnergyWeightNorm(task):
@@ -197,7 +199,7 @@ def train(predict, data_loader, epoch, optimizer=None, weight_norm=1):
     return mean_loss, mean_acc
 
 
-optimizer = torch.optim.Adam(PredictModel.parameters(), lr=LEARNING_RATE)
+optimizer = torch.optim.Adam(PredictModel.parameters(), lr=LEARNING_RATE, weight_decay=5e-5)
 scheduler = LambdaLR(optimizer, lr_lambda)
 weight_norm = EnergyWeightNorm(TaskName) if not None else 100
 best_val_loss = 99999

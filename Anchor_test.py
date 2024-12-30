@@ -1,7 +1,7 @@
 import gurobipy
 import json
 from gurobipy import GRB
-import argparse
+from get_logits import plot_logits
 import utils
 import helper
 import gp_tools
@@ -58,7 +58,7 @@ from gp_tools import primal_integral_callback, get_gp_best_objective
 #         model.addConstr(gurobipy.LinExpr(coeffs, vars) == constr.RHS, name=f"{constr.ConstrName}_tight")
 
 
-DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+DEVICE = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 random.seed(0)
 torch.manual_seed(0)
 torch.cuda.manual_seed(0)
@@ -78,7 +78,7 @@ else:
     from GCN_class import GNNPolicy_class as GNNPolicy
 
 TaskName = 'CA'
-position = True
+position = False
 gp_solve = False
 pathstr = f'./models/{model_name}'
 policy = GNNPolicy(TaskName, position=position).to(DEVICE)
@@ -153,7 +153,7 @@ for e in range(epoch):
         constraint_features = c_nodes.cpu()
         constraint_features[torch.isnan(constraint_features)] = 1  # remove nan value
         variable_features = getPE(v_nodes, position)
-        # constraint_features = torch.concat([constraint_features, torch.randn(constraint_features.shape(0), 1)], dim=1)
+        constraint_features = torch.concat([constraint_features, torch.randn(constraint_features.shape[0], 1)], dim=1)
 
         # if TaskName == "IP":
         #     variable_features = postion_get(variable_features)
@@ -165,6 +165,7 @@ for e in range(epoch):
         c_class = utils.convert_class_to_labels(c_class, constraint_features.shape[0])
 
         # prediction
+        get_logits = True
         BD = policy(
             constraint_features.to(DEVICE),
             edge_indices.to(DEVICE),
@@ -172,7 +173,12 @@ for e in range(epoch):
             variable_features.to(DEVICE),
             torch.LongTensor(v_class).to(DEVICE),
             torch.LongTensor(c_class).to(DEVICE),
-        ).cpu().squeeze()
+            get_logits=get_logits
+        )
+        if get_logits:
+            variable_features, constraint_features, BD = BD
+            plot_logits(variable_features, constraint_features, v_class, c_class)
+        BD = BD.cpu().squeeze()
         pred = BD.detach().numpy()
         rounding_errors = np.abs(np.round(pred) - pred)
         m = 0.1

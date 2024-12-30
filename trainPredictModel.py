@@ -6,9 +6,11 @@ import time
 import warnings
 from torch.optim.lr_scheduler import LambdaLR
 from tqdm import tqdm
-
 import utils
-
+seed = 3042
+random.seed(seed)
+torch.manual_seed(seed)
+torch.cuda.manual_seed(seed)
 torch.backends.cudnn.enabled = True
 torch.backends.cudnn.benchmark = True
 # this file is to train a predict model. given a instance's bipartite graph as input, the model predict the binary distribution.
