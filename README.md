@@ -84,3 +84,17 @@ python FixingStrategy_SCIP.py
 
 all solver logs will be saved in logs folder.
 
+## Anchor
+```
+GCN_class.py
+Anchor_train.py
+Anchor_test.py
+```
+
+## EGAT
+```
+[EGAT_layers.py](EGAT_layers.py)
+[EGAT_models.py](EGAT_models.py)
+[EGAT_test.py](EGAT_test.py)
+[EGAT_train.py](EGAT_train.py)
+```
