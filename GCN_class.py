@@ -129,14 +129,14 @@ class BipartiteNodeData(torch_geometric.data.Data):
 
 
 class GNNPolicy_class(torch.nn.Module):
-    def __init__(self, TaskName, position=False):
+    def __init__(self, TaskName, position=False, dropout=0.3):
         super().__init__()
         emb_size = 64
-        cons_nfeats = 5
+        cons_nfeats = 4
         edge_nfeats = 1
-        var_nfeats = 7 if not position else 18
+        var_nfeats = 6 if not position else 18
         self.temperature = 0.6
-        self.dropout = nn.Dropout(p=0.3)
+        self.dropout = nn.Dropout(dropout)
         self.se_con = SELayerGraph(emb_size)
         self.se_var = SELayerGraph(emb_size)
         # CONSTRAINT EMBEDDING
@@ -165,8 +165,6 @@ class GNNPolicy_class(torch.nn.Module):
         self.conv_v_to_c = BipartiteGraphConvolution()
         self.conv_c_to_v = BipartiteGraphConvolution()
 
-        self.cross_attention = torch.nn.MultiheadAttention(embed_dim=64, num_heads=8, batch_first=True)
-
         self.conv_v_to_c2 = BipartiteGraphConvolution()
         self.conv_c_to_v2 = BipartiteGraphConvolution()
 
@@ -185,7 +183,8 @@ class GNNPolicy_class(torch.nn.Module):
         self.anchor_gnn = AnchorGNN(TaskName, emb_size).to(DEVICE)
 
     def forward(
-            self, constraint_features, edge_indices, edge_features, variable_features, v_class, c_class, get_logits=False, c_mask=None
+            self, constraint_features, edge_indices, edge_features, variable_features, v_class, c_class,
+            get_logits=False, c_mask=None
     ):
         reversed_edge_indices = torch.stack([edge_indices[1], edge_indices[0]], dim=0)
 
@@ -314,8 +313,7 @@ class GraphDataset_class(torch_geometric.data.Dataset):
         variable_features = v_nodes
         edge_features = A._values().unsqueeze(1)
 
-        variable_features = getPE(variable_features, self.position)
-        constraint_features = torch.concat([constraint_features, torch.randn(constraint_features.shape[0], 1)], dim=1)
+        # variable_features = getPE(variable_features, self.position)
 
         constraint_features[torch.isnan(constraint_features)] = 1
 
@@ -433,11 +431,6 @@ class AnchorGNN(torch.nn.Module):
         tokenizer = T5Tokenizer.from_pretrained(path, legacy=False)
         text_encoder = T5EncoderModel.from_pretrained(path).to(DEVICE)
         var_fea, con_fea, edge, edge_feature = get_by_semantics(task, tokenizer, text_encoder)
-        self.proj = torch.nn.Sequential(
-            torch.nn.Linear(768, 2 * emb_size),
-            torch.nn.ReLU(),
-            torch.nn.Linear(2 * emb_size, emb_size),
-        )
         self.v_sem_fea = var_fea
         # self.v_sem_fea = nn.parameter.Parameter(var_fea, requires_grad=True)
         self.v_n_class = var_fea.shape[0]
@@ -449,22 +442,20 @@ class AnchorGNN(torch.nn.Module):
 
         self.self_att = torch.nn.MultiheadAttention(self.emb_size, num_heads=4, batch_first=False)
 
-        self.send_var = torch.nn.Sequential(
-            torch.nn.Linear(emb_size, emb_size),
-        )
-        self.send_con = torch.nn.Sequential(
-            torch.nn.Linear(emb_size, emb_size),
-        )
-        self.rec_var = torch.nn.Sequential(
-            torch.nn.Linear(self.v_n_class, emb_size),
-        )
-        self.rec_con = torch.nn.Sequential(
-            torch.nn.Linear(self.c_n_class, emb_size),
+        self.proj_var = torch.nn.Sequential(
+            torch.nn.Linear(768, 2 * emb_size),
+            torch.nn.ReLU(),
+            torch.nn.Linear(2 * emb_size, emb_size),
         )
 
-        self.anchor1 = Anchor1(self.v_n_class, self.c_n_class, emb_size)
-        self.anchor2 = Anchor2(self.v_n_class, self.c_n_class, emb_size)
-        self.anchor3 = Anchor3(self.v_n_class, self.c_n_class, emb_size)
+        self.proj_con = torch.nn.Sequential(
+            torch.nn.Linear(768, 2 * emb_size),
+            torch.nn.ReLU(),
+            torch.nn.Linear(2 * emb_size, emb_size),
+        )
+
+        self.anchor = Anchor1(self.v_n_class, self.c_n_class, emb_size)
+        # self.anchor = Anchor3(self.v_n_class, self.c_n_class, emb_size)
 
     def forward(self, v, c, v_class, c_class, mpnn=False):
         # v_class: [[indices],...,[indices]]   get batch
@@ -472,34 +463,15 @@ class AnchorGNN(torch.nn.Module):
         c_class = c_class.to(c.device)
         v = self.layer_norm(v)
         c = self.layer_norm(c)
-        fea = torch.concat([self.v_sem_fea, self.c_sem_fea], dim=0)
-        fea = self.proj(fea)  # 768 -> 64
+        v_sem_fea = self.proj_var(self.v_sem_fea)
+        c_sem_fea = self.proj_con(self.c_sem_fea)
+        fea = torch.concat([v_sem_fea, c_sem_fea], dim=0)
         fea_sem = self.self_att(fea, fea, fea)[0]
         fea_sem = self.layer_norm(fea_sem + fea).squeeze(1)
         v_sem = fea_sem[:self.v_n_class]
         c_sem = fea_sem[-self.c_n_class:]
-        # send
-        v_s = self.send_var(v)
-        c_s = self.send_con(c)
 
-        if not mpnn:
-            # v_updates, c_updates = self.anchor3(v_s, c_s, v_sem, c_sem, v_class, c_class)
-            # v_updates = self.layer_norm(v_updates)
-            # v_s = self.rec_var(torch.cat([v_s, v_updates], dim=-1))
-            # c_updates = self.layer_norm(c_updates)
-            # c_s = self.rec_con(torch.cat([c_s, c_updates], dim=-1))
-
-            # v_updates, c_updates = self.anchor2(v_s, c_s, v_sem, c_sem, v_class, c_class)
-
-            v_final, c_final = self.anchor1(v_s, c_s, v_sem, c_sem, v_class, c_class)
-            self.layer_norm(v_final)
-            v_updates = v_s @ v_final.transpose(0, 1)
-            v_updates = torch.sin(self.rec_var(v_updates))
-            v_s = v_s * v_updates
-            self.layer_norm(c_final)
-            c_updates = c_s @ c_final.transpose(0, 1)
-            c_updates = torch.sin(self.rec_con(c_updates))
-            c_s = c_s * c_updates
+        v_s, c_s = self.anchor(v, c, v_sem, c_sem, v_class, c_class)
 
         return v_s, c_s
 
@@ -513,10 +485,25 @@ class Anchor1(torch.nn.Module):
         self.layer_norm = nn.LayerNorm(self.emb_size)
         self.cross_att_var = torch.nn.MultiheadAttention(self.emb_size, num_heads=4, batch_first=False)
         self.cross_att_con = torch.nn.MultiheadAttention(self.emb_size, num_heads=4, batch_first=False)
+        self.send_var = torch.nn.Sequential(
+            torch.nn.Linear(emb_size, emb_size),
+        )
+        self.send_con = torch.nn.Sequential(
+            torch.nn.Linear(emb_size, emb_size),
+        )
+        self.rec_var = torch.nn.Sequential(
+            torch.nn.Linear(self.v_n, emb_size),
+        )
+        self.rec_con = torch.nn.Sequential(
+            torch.nn.Linear(self.c_n, emb_size),
+        )
+        self.norm = nn.LayerNorm(emb_size)
 
-    def forward(self, v_s, c_s, v_sem, c_sem, v_class, c_class):
-        v_final_list = []
-        c_final_list = []
+    def forward(self, v, c, v_sem, c_sem, v_class, c_class):
+        v_s = self.send_var(v)
+        c_s = self.send_con(c)
+        v_updates = torch.zeros_like(v_s)
+        c_updates = torch.zeros_like(c_s)
 
         for v_i in range(self.v_n):
             v_i_indices = torch.nonzero(v_class == v_i, as_tuple=False).squeeze(1)
@@ -525,8 +512,8 @@ class Anchor1(torch.nn.Module):
             v_i_fea = v_s[v_i_indices].unsqueeze(1)
             v_i_sem = v_sem[v_i].unsqueeze(0).unsqueeze(1)
             v_i_final = self.cross_att_var(v_i_sem, v_i_fea, v_i_fea)[0].squeeze(1)
-            v_final_list.append(v_i_final)
-        v_final = torch.cat(v_final_list)
+            v_i_final = self.norm(v_i_fea.squeeze(1) * v_i_final)
+            v_updates[v_i_indices] = v_i_final
 
         for c_i in range(self.c_n):
             c_i_indices = torch.nonzero(c_class == c_i, as_tuple=False).squeeze(1)
@@ -535,10 +522,10 @@ class Anchor1(torch.nn.Module):
             c_i_fea = c_s[c_i_indices].unsqueeze(1)
             c_i_sem = c_sem[c_i].unsqueeze(0).unsqueeze(1)
             c_i_final = self.cross_att_con(c_i_sem, c_i_fea, c_i_fea)[0].squeeze(1)
-            c_final_list.append(c_i_final)
-        c_final = torch.cat(c_final_list)
+            c_i_final = self.norm(c_i_fea.squeeze(1) * c_i_final)
+            c_updates[c_i_indices] = c_i_final
 
-        return v_final, c_final
+        return v_updates, c_updates
 
 
 class Anchor3(torch.nn.Module):
@@ -550,9 +537,26 @@ class Anchor3(torch.nn.Module):
         self.layer_norm = nn.LayerNorm(self.emb_size)
         self.cross_att_var = torch.nn.MultiheadAttention(self.emb_size, num_heads=4, batch_first=False)
         self.cross_att_con = torch.nn.MultiheadAttention(self.emb_size, num_heads=4, batch_first=False)
+        self.send_var = torch.nn.Sequential(
+            torch.nn.Linear(emb_size, emb_size),
+        )
+        self.send_con = torch.nn.Sequential(
+            torch.nn.Linear(emb_size, emb_size),
+        )
 
-    def forward(self, v_s, c_s, v_sem, c_sem, v_class, c_class):
-        v_mask = (v_class.unsqueeze(1) == torch.arange(self.v_n_class, device=DEVICE).unsqueeze(0))
+        self.rec_var = torch.nn.Sequential(
+            torch.nn.Linear(2 * emb_size, emb_size),
+        )
+        self.rec_con = torch.nn.Sequential(
+            torch.nn.Linear(2 * emb_size, emb_size),
+        )
+        self.layer_norm = nn.LayerNorm(self.emb_size)
+
+    def forward(self, v, c, v_sem, c_sem, v_class, c_class):
+        v_s = self.send_var(v)
+        c_s = self.send_con(c)
+
+        v_mask = (v_class.unsqueeze(1) == torch.arange(self.v_n, device=DEVICE).unsqueeze(0))
         v_mask = v_mask.float()
         v_class_count = v_mask.sum(dim=0, keepdim=True) + 1e-8
         v_i_fea = torch.matmul(v_mask.T, v_s) / v_class_count.T  # 平均池化 [n_classes, dim]
@@ -561,7 +565,7 @@ class Anchor3(torch.nn.Module):
         v_i_final = self.cross_att_var(v_i_sem, v_i_fea, v_i_fea)[0].squeeze(1)  # [n_classes, dim]
         v_updates = torch.matmul(v_mask, v_i_final)  # [n_variables, dim]
 
-        c_mask = (c_class.unsqueeze(1) == torch.arange(self.c_n_class, device=DEVICE).unsqueeze(0))
+        c_mask = (c_class.unsqueeze(1) == torch.arange(self.c_n, device=DEVICE).unsqueeze(0))
         c_mask = c_mask.float()
         c_class_count = c_mask.sum(dim=0, keepdim=True) + 1e-8
         c_i_fea = torch.matmul(c_mask.T, c_s) / c_class_count.T  # 平均池化 [n_classes, dim]
@@ -570,41 +574,9 @@ class Anchor3(torch.nn.Module):
         c_i_final = self.cross_att_con(c_i_sem, c_i_fea, c_i_fea)[0].squeeze(1)  # [n_classes, dim]
         c_updates = torch.matmul(c_mask, c_i_final)  # [n_constraints, dim]
 
-        return v_updates, c_updates
+        v_updates = self.layer_norm(v_updates)
+        v_s = self.rec_var(torch.cat([v_s, v_updates], dim=-1))
+        c_updates = self.layer_norm(c_updates)
+        c_s = self.rec_con(torch.cat([c_s, c_updates], dim=-1))
 
-
-class Anchor2(torch.nn.Module):
-    def __init__(self, v_n, c_n, emb_size=64):
-        super().__init__()
-        self.emb_size = emb_size
-        self.v_n = v_n
-        self.c_n = c_n
-        self.layer_norm = nn.LayerNorm(self.emb_size)
-        self.cross_att_var = torch.nn.MultiheadAttention(self.emb_size, num_heads=4, batch_first=False)
-        self.cross_att_con = torch.nn.MultiheadAttention(self.emb_size, num_heads=4, batch_first=False)
-
-    def forward(self, v_s, c_s, v_sem, c_sem, v_class, c_class):
-        v_updates = torch.zeros_like(v_s)
-        c_updates = torch.zeros_like(c_s)
-
-        for v_i in range(self.v_n):
-            v_i_indices = torch.nonzero(v_class == v_i, as_tuple=False).squeeze(1)
-            if len(v_i_indices) == 0:
-                continue
-            v_i_fea = v_s[v_i_indices].unsqueeze(1)
-            v_i_sem = v_sem[v_i].unsqueeze(0).unsqueeze(1)
-            v_i_final = self.cross_att_var(v_i_sem, v_i_fea, v_i_fea)[0].squeeze(1)
-            v_updates[v_i_indices] += v_i_final
-
-        for c_i in range(self.c_n):
-            c_i_indices = torch.nonzero(c_class == c_i, as_tuple=False).squeeze(1)
-            if len(c_i_indices) == 0:
-                continue
-            c_i_fea = c_s[c_i_indices].unsqueeze(1)
-            c_i_sem = c_sem[c_i].unsqueeze(0).unsqueeze(1)
-            c_i_final = self.cross_att_con(c_i_sem, c_i_fea, c_i_fea)[0].squeeze(1)
-            c_updates[c_i_indices] += c_i_final
-
-        return v_updates, c_updates
-
-
+        return v_s, c_s

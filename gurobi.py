@@ -108,7 +108,7 @@ def collect(ins_dir, q, sol_dir, log_dir, bg_dir, settings):
 
 
 if __name__ == '__main__':
-    sizes = ["CA"]
+    sizes = ["WA", "IP"]
     # sizes=["IP","WA","IS","CA","NNV"]
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataDir', type=str, default='./')

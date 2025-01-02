@@ -17,8 +17,8 @@ torch.backends.cudnn.benchmark = True
 
 # 4 public datasets, IS, WA, CA, IP
 # train task
-TaskName = "CA"
-edl = True
+TaskName = "WA"
+edl = False
 position = False
 warnings.filterwarnings("ignore")
 # set folder
@@ -38,13 +38,13 @@ log_file = open(f'{log_save_path}{train_task}_train.log', 'wb')
 # set params
 LEARNING_RATE = 0.001
 NB_EPOCHS = 100
-BATCH_SIZE = 4
+BATCH_SIZE = 2
 NUM_WORKERS = 0
 WEIGHT_NORM = 100
 
 # dataset task
-TaskName = "CA"
-DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+TaskName = "WA"
+DEVICE = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 DIR_BG = f'./dataset/{TaskName}/BG'
 DIR_SOL = f'./dataset/{TaskName}/solution'
 sample_names = os.listdir(DIR_BG)
@@ -74,7 +74,7 @@ PredictModel = GNNPolicy(TaskName, position=position).to(DEVICE)
 
 
 def lr_lambda(epoch):
-    return 0.98 ** ((epoch + 1) // 5)
+    return 0.95 ** ((epoch + 1) // 4)
 
 
 def EnergyWeightNorm(task):

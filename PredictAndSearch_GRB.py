@@ -11,6 +11,8 @@ import os
 import numpy as np
 import torch
 from time import time
+
+from get_logits import plot_logits
 from helper import get_a_new2, get_bigraph, get_pattern
 from GCN_class import getPE
 from gp_tools import primal_integral_callback, get_gp_best_objective
@@ -66,7 +68,7 @@ edl = False
 position = False
 gp_solve = False
 # edl, ca
-TaskName = "CA_edl"
+TaskName = "WA_0"
 if TaskName == "CA_edl" or TaskName == "CA_fisher":
     edl = True
 model_name = f'{TaskName}.pth'
@@ -81,7 +83,7 @@ elif edl:
 else:
     from GCN import GNNPolicy as GNNPolicy
 
-TaskName = 'CA'
+TaskName = 'WA'
 pathstr = f'./models/{model_name}'
 policy = GNNPolicy(TaskName, position=position).to(DEVICE)
 state = torch.load(pathstr, map_location=DEVICE)
@@ -138,11 +140,12 @@ max_time = 0
 ps_int_total = 0
 gp_int_total = 0
 
-ALL_Test = 60  # 33
+ALL_Test = 30  # 33
 epoch = 1
 TestNum = round(ALL_Test / epoch)
 
-gp_obj_list = get_gp_best_objective(f'./logs/{TaskName}/{test_task}')
+if not gp_solve:
+    gp_obj_list = get_gp_best_objective(f'./logs/{TaskName}/{test_task}')
 
 for e in range(epoch):
     for ins_num in range(TestNum):
@@ -295,7 +298,7 @@ for e in range(epoch):
         if max_time <= t:
             max_time = t
         if m.status in [GRB.OPTIMAL, GRB.TIME_LIMIT]:
-            subop = abs(pre_obj - obj) / abs(obj + 1e-8)
+            subop = (pre_obj - obj) / (obj + 1e-8) if TaskName != "CA" else (obj - pre_obj) / (obj + 1e-8)
             subop_total += subop
             print(
                 f"ps 最优值：{pre_obj}; subopt: {round(subop, 4)}; subop_avg: {round(subop_total / (ins_num + 1), 4)}")

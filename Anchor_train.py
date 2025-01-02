@@ -75,7 +75,7 @@ PredictModel = GNNPolicy(TaskName, position=position).to(DEVICE)
 
 
 def lr_lambda(epoch):
-    return 0.95 ** ((epoch + 1) // 5)
+    return 0.95 ** ((epoch + 1) // 4)
 
 
 def EnergyWeightNorm(task):
@@ -149,8 +149,6 @@ def train(predict, data_loader, epoch, optimizer=None, weight_norm=1):
                 batch.v_class,
                 batch.c_class,
             )
-            if load:
-                BD = BD.sigmoid()
 
             # compute loss
             loss = 0
@@ -199,16 +197,10 @@ def train(predict, data_loader, epoch, optimizer=None, weight_norm=1):
     return mean_loss, mean_acc
 
 
-optimizer = torch.optim.Adam(PredictModel.parameters(), lr=LEARNING_RATE, weight_decay=5e-5)
+optimizer = torch.optim.Adam(PredictModel.parameters(), lr=LEARNING_RATE)
 scheduler = LambdaLR(optimizer, lr_lambda)
 weight_norm = EnergyWeightNorm(TaskName) if not None else 100
 best_val_loss = 99999
-load = False
-if load:
-    PredictModel.load_state_dict(torch.load(f'./models/{TaskName}.pth'))
-    PredictModel.eval()
-    valid_loss, valid_acc = train(PredictModel, valid_loader, 0, None, weight_norm)
-    print(f"eval load model . Valid loss: {valid_loss:0.3f} Valid acc: {valid_acc:0.6f}\n")
 
 for epoch in range(NB_EPOCHS):
     begin = time.time()

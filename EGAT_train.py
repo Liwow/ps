@@ -70,7 +70,7 @@ train_loader = torch_geometric.loader.DataLoader(train_data, batch_size=BATCH_SI
 valid_data = GraphDataset(valid_files, position=position)
 valid_loader = torch_geometric.loader.DataLoader(valid_data, batch_size=BATCH_SIZE, shuffle=False,
                                                  num_workers=NUM_WORKERS)
-nfeat = 7 if not position else 18
+nfeat = 6 if not position else 18
 PredictModel = EGATPolicy(nfeat=nfeat,  # Feature dimension
                           nhid=64,  # Feature dimension of each hidden layer
                           nclass=2,  # int(data_solution[0].max()) + 1, Number of classes

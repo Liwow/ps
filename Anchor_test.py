@@ -63,7 +63,7 @@ random.seed(0)
 torch.manual_seed(0)
 torch.cuda.manual_seed(0)
 multimodal = False
-TaskName = "CA_anchor"
+TaskName = "WA_anchor2"
 model_name = f'{TaskName}.pth'
 if TaskName == "CA_multi":
     multimodal = True
@@ -77,7 +77,7 @@ else:
     # from GCN import GNNPolicy as GNNPolicy
     from GCN_class import GNNPolicy_class as GNNPolicy
 
-TaskName = 'CA'
+TaskName = 'WA'
 position = False
 gp_solve = False
 pathstr = f'./models/{model_name}'
@@ -136,10 +136,10 @@ max_time = 0
 ps_int_total = 0
 gp_int_total = 0
 
-ALL_Test = 60  # 33
+ALL_Test = 30  # 33
 epoch = 1
 TestNum = round(ALL_Test / epoch)
-
+gp_obj_list = get_gp_best_objective(f'./logs/{TaskName}/{test_task}')
 for e in range(epoch):
     for ins_num in range(TestNum):
         t_start = time()
@@ -151,9 +151,10 @@ for e in range(epoch):
                                                                               c_class_name)
         # A, v_map, v_nodes, c_nodes, b_vars = get_a_new2(ins_name_to_read)
         constraint_features = c_nodes.cpu()
+        variable_features = v_nodes
         constraint_features[torch.isnan(constraint_features)] = 1  # remove nan value
-        variable_features = getPE(v_nodes, position)
-        constraint_features = torch.concat([constraint_features, torch.randn(constraint_features.shape[0], 1)], dim=1)
+        # variable_features = getPE(v_nodes, position)
+
 
         # if TaskName == "IP":
         #     variable_features = postion_get(variable_features)
@@ -165,7 +166,7 @@ for e in range(epoch):
         c_class = utils.convert_class_to_labels(c_class, constraint_features.shape[0])
 
         # prediction
-        get_logits = True
+        get_logits = False
         BD = policy(
             constraint_features.to(DEVICE),
             edge_indices.to(DEVICE),
@@ -248,7 +249,7 @@ for e in range(epoch):
             gp_int_total += primal_integral
             print("gp_int_total：", gp_int_total)
         else:
-            obj = get_gp_best_objective(f'./logs/{TaskName}/{test_task}')[(0 + e) * TestNum + ins_num]
+            obj = gp_obj_list[(0 + e) * TestNum + ins_num]
         print("gurobi 最优解：", obj)
         m.reset()
         m.Params.TimeLimit = 800
@@ -300,7 +301,7 @@ for e in range(epoch):
         if max_time <= t:
             max_time = t
         if m.status in [GRB.OPTIMAL, GRB.TIME_LIMIT]:
-            subop = abs(pre_obj - obj) / abs(obj)
+            subop = (pre_obj - obj) / (obj + 1e-8) if TaskName != "CA" else (obj - pre_obj) / (obj + 1e-8)
             subop_total += subop
             print(
                 f"ps 最优值：{pre_obj}; subopt: {round(subop, 4)}; subop_total: {round(subop_total / (ins_num + 1), 4)}")

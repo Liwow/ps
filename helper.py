@@ -376,8 +376,8 @@ def get_a_new2(ins_name):
         if v != 0:
             indices_spr[0].append(ncons)
             indices_spr[1].append(v_indx)
-            # values_spr.append(v)
-            values_spr.append(1)
+            values_spr.append(v)
+            # values_spr.append(1)
         v_nodes[v_indx][0] = v
 
         # print(v_indx,float(nvars),v_indx/float(nvars),v_nodes[v_indx][ori_start:ori_start+emb_num])
@@ -428,7 +428,7 @@ def get_a_new2(ins_name):
             if coeff[k] != 0:
                 indices_spr[0].append(cind)
                 indices_spr[1].append(v_indx)
-                values_spr.append(1)
+                values_spr.append(coeff[k])
             v_nodes[v_indx][2] += 1
             v_nodes[v_indx][1] += coeff[k] / lcons
             v_nodes[v_indx][3] = max(v_nodes[v_indx][3], coeff[k])
@@ -532,7 +532,7 @@ def get_bigraph(ins_name, v_class_name=None, c_class_name=None, couple=0):
         if v != 0:
             indices_spr[0].append(ncons)
             indices_spr[1].append(v_indx)
-            values_spr.append(1)
+            values_spr.append(v)
 
         v_nodes[v_indx][0] = v
         obj_node[0] += v

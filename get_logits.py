@@ -88,6 +88,8 @@ def reduce_dimensions(data, method='tsne', n_components=2):
 def plot_embeddings(embeddings, labels, title, ax):
     unique_labels = np.unique(labels)
     for label in unique_labels:
+        if label == 1:
+            continue
         idx = labels == label
         ax.scatter(embeddings[idx, 0], embeddings[idx, 1], label=f"Class {label}", alpha=0.7)
     ax.set_title(title)

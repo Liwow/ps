@@ -147,8 +147,8 @@ class EgatDataset(torch_geometric.data.Dataset):
         edge_indices = A._indices()
 
         variable_features = v_nodes
-        variable_features = getPE(variable_features, self.position)
-        constraint_features = torch.concat([constraint_features, torch.randn(constraint_features.shape[0], 1)], dim=1)
+        # variable_features = getPE(variable_features, self.position)
+        # constraint_features = torch.concat([constraint_features, torch.randn(constraint_features.shape[0], 1)], dim=1)
         edge_features = A._values().unsqueeze(1)
 
         constraint_features[torch.isnan(constraint_features)] = 1

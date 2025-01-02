@@ -61,8 +61,7 @@ class GNNPolicy(torch.nn.Module):
         )
 
     def forward(
-            self, constraint_features, edge_indices, edge_features, variable_features
-            # , multimodal_features
+            self, constraint_features, edge_indices, edge_features, variable_features, get_logits=False
     ):
         reversed_edge_indices = torch.stack([edge_indices[1], edge_indices[0]], dim=0)
 
@@ -88,6 +87,8 @@ class GNNPolicy(torch.nn.Module):
 
         # A final MLP on the variable features
         output = self.output_module(variable_features).squeeze(-1)
+        if get_logits:
+            return variable_features, constraint_features, output
 
         return output, variable_features, constraint_features
 
@@ -1155,6 +1156,7 @@ def getPE(var_fea, p=True, d_model=12):
         random_features = torch.randn(lens, 1)
         var_fea = torch.concat([var_fea, random_features], dim=1)
     return var_fea
+
 
 def Loss_CV(mip, sol_per, con_per):
     lamda = 1
