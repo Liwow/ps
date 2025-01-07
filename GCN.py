@@ -1135,7 +1135,7 @@ def postion_get(variable_features):
     return v
 
 
-def getPE(var_fea, p=True, d_model=12):
+def getPE(var_fea, p=False, d_model=12):
     lens = var_fea.shape[0]
     if p:
         d_model = 12  # max length 4095
@@ -1152,9 +1152,9 @@ def getPE(var_fea, p=True, d_model=12):
         # pe[:, 1::2] = torch.cos(position * div_term)  # 奇数列: cos
 
         var_fea = torch.concat([var_fea, pe], dim=1)
-    else:
-        random_features = torch.randn(lens, 1)
-        var_fea = torch.concat([var_fea, random_features], dim=1)
+    # else:
+    #     random_features = torch.randn(lens, 1)
+    #     var_fea = torch.concat([var_fea, random_features], dim=1)
     return var_fea
 
 

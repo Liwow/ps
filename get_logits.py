@@ -15,7 +15,6 @@ from GCN_class import getPE
 from gp_tools import primal_integral_callback, get_gp_best_objective
 
 
-#
 # DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 # random.seed(0)
 # torch.manual_seed(0)
@@ -133,3 +132,5 @@ def plot_logits(v_logits, c_logits, v_class, c_class):
     plt.show()
 
     plot_embeddings_combined(v_embeddings, c_embeddings, v_class, c_class, "Combined V and C Nodes")
+
+

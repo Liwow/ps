@@ -34,7 +34,7 @@ def generate_instances(num_instances, istrain, size, epoch=0):
         generator = ecole.instance.CapacitatedFacilityLocationGenerator(50, 100)
     elif size == "IS":
         generator = ecole.instance.IndependentSetGenerator(1500)
-    elif size == "CA_m" or size == "CA":
+    elif size == "CA_big" or size == "CA":
         if epoch == 0:
             generator = ecole.instance.CombinatorialAuctionGenerator(100, 500)
         elif epoch == 1:
@@ -42,7 +42,7 @@ def generate_instances(num_instances, istrain, size, epoch=0):
         elif epoch == 2:
             generator = ecole.instance.CombinatorialAuctionGenerator(300, 1500)
         else:
-            generator = ecole.instance.CombinatorialAuctionGenerator(300, 1500)
+            generator = ecole.instance.CombinatorialAuctionGenerator(600, 3000)
     elif size == "SC":
         generator = ecole.instance.SetCoverGenerator(1000, 2000)
     else:
@@ -86,4 +86,4 @@ if __name__ == '__main__':
         for i in range(3):
             generate_instances(100, "test", "CA", epoch=i)
     else:
-        generate_instances(300, "train", "CA", epoch=2)
+        generate_instances(30, "test", "CA_big", epoch=4)

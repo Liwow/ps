@@ -15,9 +15,8 @@ torch.backends.cudnn.enabled = True
 torch.backends.cudnn.benchmark = True
 # this file is to train a predict model. given a instance's bipartite graph as input, the model predict the binary distribution.
 
-# 4 public datasets, IS, WA, CA, IP
 # train task
-TaskName = "WA"
+TaskName = "CA"
 multimodal = False
 position = False
 warnings.filterwarnings("ignore")
@@ -37,13 +36,12 @@ log_file = open(f'{log_save_path}{train_task}_train.log', 'wb')
 
 # set params
 LEARNING_RATE = 0.001
-NB_EPOCHS = 500
+NB_EPOCHS = 50
 BATCH_SIZE = 2
 NUM_WORKERS = 0
 WEIGHT_NORM = 100
 
 # dataset task
-TaskName = "WA"
 DEVICE = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 DIR_BG = f'./dataset/{TaskName}/BG'
 DIR_SOL = f'./dataset/{TaskName}/solution'
@@ -51,13 +49,13 @@ sample_names = os.listdir(DIR_BG)
 sample_files = [(os.path.join(DIR_BG, name), os.path.join(DIR_SOL, name).replace('bg', 'sol')) for name in sample_names]
 train_files, valid_files = utils.split_sample_by_blocks(sample_files, 0.9, block_size=100)
 
-if TaskName == "IP_":
+if TaskName == "IP":
     # Add position embedding for IP model, due to the strong symmetry
-    from GCN import GNNPolicy_position as GNNPolicy
-    from GCN import GraphDataset_position as GraphDataset
-elif multimodal:
-    from GCN import GraphDataset
-    from GCN import GNNPolicy_multimodal as GNNPolicy
+    # from GCN import GNNPolicy_position as GNNPolicy
+    # from GCN import GraphDataset_position as GraphDataset
+    position = True
+    from GCN_class import GraphDataset_class as GraphDataset
+    from GCN_class import GNNPolicy_class as GNNPolicy
 else:
     from GCN_class import GraphDataset_class as GraphDataset
     from GCN_class import GNNPolicy_class as GNNPolicy

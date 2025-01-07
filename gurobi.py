@@ -108,7 +108,7 @@ def collect(ins_dir, q, sol_dir, log_dir, bg_dir, settings):
 
 
 if __name__ == '__main__':
-    sizes = ["WA", "IP"]
+    sizes = ["IP"]
     # sizes=["IP","WA","IS","CA","NNV"]
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataDir', type=str, default='./')
@@ -159,6 +159,11 @@ if __name__ == '__main__':
         random.seed(42)
         random.shuffle(filenames)
         filenames = filenames[:num]
+        if len(os.listdir(SOL_DIR)) == num:
+            print("already have all sols")
+            sols_names = os.listdir(SOL_DIR)
+            filenames = [name.removesuffix(".sol") for name in sols_names]
+            filenames.sort()
 
         q = Queue()
         # add ins

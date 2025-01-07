@@ -313,7 +313,7 @@ class GraphDataset_class(torch_geometric.data.Dataset):
         variable_features = v_nodes
         edge_features = A._values().unsqueeze(1)
 
-        # variable_features = getPE(variable_features, self.position)
+        variable_features = getPE(variable_features, self.position)
 
         constraint_features[torch.isnan(constraint_features)] = 1
 

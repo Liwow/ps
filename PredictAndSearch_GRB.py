@@ -1,3 +1,5 @@
+import pickle
+
 import gurobipy
 import json
 from gurobipy import GRB
@@ -66,24 +68,25 @@ torch.manual_seed(0)
 torch.cuda.manual_seed(0)
 edl = False
 position = False
-gp_solve = False
+gp_solve = True
+Threads = 24
+TimeLimit = 800
 # edl, ca
-TaskName = "WA_0"
-if TaskName == "CA_edl" or TaskName == "CA_fisher":
+ModelName = "CA"
+if ModelName == "CA_edl" or ModelName == "CA_fisher":
     edl = True
-model_name = f'{TaskName}.pth'
+model_name = f'{ModelName}.pth'
 # load pretrained model
-if TaskName == "IP":
+if ModelName.startswith("IP"):
     # Add position embedding for IP model, due to the strong symmetry
     from GCN import GNNPolicy_position as GNNPolicy, postion_get
-
     position = True
 elif edl:
     from GCN_edl import GNNPolicy_edl as GNNPolicy
 else:
     from GCN import GNNPolicy as GNNPolicy
 
-TaskName = 'WA'
+TaskName = ModelName.split("_")[0]
 pathstr = f'./models/{model_name}'
 policy = GNNPolicy(TaskName, position=position).to(DEVICE)
 state = torch.load(pathstr, map_location=DEVICE)
@@ -122,16 +125,17 @@ k_0, k_1, delta = test_hyperparam(TaskName)
 
 # set log folder
 solver = 'GRB'
-test_task = f'{TaskName}_{solver}_Predect&Search'
+instanceName = "CA_big"
+test_task = f'{instanceName}_{solver}_Predect&Search'
 if not os.path.isdir(f'./logs'):
     os.mkdir(f'./logs')
-if not os.path.isdir(f'./logs/{TaskName}'):
-    os.mkdir(f'./logs/{TaskName}')
-if not os.path.isdir(f'./logs/{TaskName}/{test_task}'):
-    os.mkdir(f'./logs/{TaskName}/{test_task}')
-log_folder = f'./logs/{TaskName}/{test_task}'
+if not os.path.isdir(f'./logs/{instanceName}'):
+    os.mkdir(f'./logs/{instanceName}')
+if not os.path.isdir(f'./logs/{instanceName}/{test_task}'):
+    os.mkdir(f'./logs/{instanceName}/{test_task}')
+log_folder = f'./logs/{instanceName}/{test_task}'
 
-sample_names = sorted(os.listdir(f'./instance/test/{TaskName}'))
+sample_names = sorted(os.listdir(f'./instance/test/{instanceName}'))
 
 subop_total = 0
 time_total = 0
@@ -145,13 +149,15 @@ epoch = 1
 TestNum = round(ALL_Test / epoch)
 
 if not gp_solve:
-    gp_obj_list = get_gp_best_objective(f'./logs/{TaskName}/{test_task}')
+    gp_obj_list = get_gp_best_objective(f'./logs/{instanceName}/{test_task}')
+else:
+    gp_obj_list = []
 
 for e in range(epoch):
     for ins_num in range(TestNum):
         t_start = time()
         test_ins_name = sample_names[(0 + e) * TestNum + ins_num]
-        ins_name_to_read = f'./instance/test/{TaskName}/{test_ins_name}'
+        ins_name_to_read = f'./instance/test/{instanceName}/{test_ins_name}'
         # get bipartite graph as input
         A, v_map, v_nodes, c_nodes, b_vars = get_a_new2(ins_name_to_read)
         constraint_features = c_nodes.cpu()
@@ -177,10 +183,10 @@ for e in range(epoch):
             BD = policy.get_p(BD)
         BD = BD[0].cpu().squeeze()
 
-        pred = BD.detach().numpy()
-        rounding_errors = np.abs(np.round(pred) - pred)
-        m = 0.1
-        top_m_indices = np.argsort(-rounding_errors)[:int(m * len(pred))]
+        # pred = BD.detach().numpy()
+        # rounding_errors = np.abs(np.round(pred) - pred)
+        # m = 0.1
+        # top_m_indices = np.argsort(-rounding_errors)[:int(m * len(pred))]
         # naive_distance = np.sum(np.abs(np.round(pred[top_m_indices]) - label[top_m_indices]))
 
         # align the variable name betweend the output and the solver
@@ -225,16 +231,24 @@ for e in range(epoch):
         # 修复预测初始解，得到初始可行解
         # _, tc_1 = test.project_to_feasible_region_and_get_tight_constraints(m, x_pred)
 
-        m.Params.TimeLimit = 800
-        m.Params.Threads = 32
+        m.Params.TimeLimit = TimeLimit
+        m.Params.Threads = Threads
         m.Params.MIPFocus = 1
         m.Params.LogFile = f'{log_folder}/{test_ins_name}.log'
         gurobipy.setParam('LogToConsole', 1)
 
         if gp_solve:
             primal_integral_callback.gap_records = []
+            output_folder = f"./logs/{instanceName}/{TaskName}_GRB_sols"
+            os.makedirs(output_folder, exist_ok=True)
+            output_file = os.path.join(output_folder, f"{test_ins_name}.sol")
             m.optimize(primal_integral_callback)
             obj = m.objVal
+            integer_sols = [v.x for v in m.getVars() if v.vType in ['I', 'B']]
+            if m.status in [GRB.OPTIMAL, GRB.TIME_LIMIT]:
+                with open(output_file, "wb") as f:
+                    pickle.dump(integer_sols, f)
+
             gap_records = primal_integral_callback.gap_records
             primal_integral = 0.0
             if len(gap_records) > 1:
@@ -249,8 +263,8 @@ for e in range(epoch):
             obj = gp_obj_list[(0 + e) * TestNum + ins_num]
         print("gurobi 最优解：", obj)
         m.reset()
-        m.Params.TimeLimit = 800
-        m.Params.Threads = 32
+        m.Params.TimeLimit = TimeLimit
+        m.Params.Threads = Threads
         m.Params.MIPFocus = 1
 
         # trust region method implemented by adding constraints

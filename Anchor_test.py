@@ -1,3 +1,5 @@
+import pickle
+
 import gurobipy
 import json
 from gurobipy import GRB
@@ -63,28 +65,25 @@ random.seed(0)
 torch.manual_seed(0)
 torch.cuda.manual_seed(0)
 multimodal = False
-TaskName = "WA_anchor2"
-model_name = f'{TaskName}.pth'
-if TaskName == "CA_multi":
+position = False
+gp_solve = False
+Threads = 24
+TimeLimit = 800
+ModelName = "WA_anchor2"
+model_name = f'{ModelName}.pth'
+if ModelName == "CA_multi":
     multimodal = True
 # load pretrained model
-if TaskName == "IP":
+if ModelName.startswith("IP"):
     # Add position embedding for IP model, due to the strong symmetry
     from GCN import GNNPolicy_position as GNNPolicy, postion_get
+
+    position = True
 elif multimodal:
     from GCN import GNNPolicy_multimodal as GNNPolicy
 else:
     # from GCN import GNNPolicy as GNNPolicy
     from GCN_class import GNNPolicy_class as GNNPolicy
-
-TaskName = 'WA'
-position = False
-gp_solve = False
-pathstr = f'./models/{model_name}'
-policy = GNNPolicy(TaskName, position=position).to(DEVICE)
-state = torch.load(pathstr, map_location=DEVICE)
-policy.load_state_dict(state)
-policy.eval()
 
 
 def test_hyperparam(task):
@@ -98,8 +97,10 @@ def test_hyperparam(task):
         return 300, 300, 20
     elif task == "WA":  # 0, 500, 10
         return 0, 500, 10
-    elif task == "CA" or task == "CA_m":  # 600 0 1
+    elif task == "CA":  # 600 0 1
         return 600, 0, 1
+    elif task == "CA_big":
+        return 1000, 0, 5
     elif task == "beasley":
         return 50, 17, 10
     elif task == "ns":
@@ -114,20 +115,26 @@ def test_hyperparam(task):
         return 14, 12, 9
 
 
-k_0, k_1, delta = test_hyperparam(TaskName)
+TaskName = 'WA'
+pathstr = f'./models/{model_name}'
+policy = GNNPolicy(TaskName, position=position).to(DEVICE)
+state = torch.load(pathstr, map_location=DEVICE)
+policy.load_state_dict(state)
+policy.eval()
 
 # set log folder
 solver = 'GRB'
-test_task = f'{TaskName}_{solver}_Predect&Search'
+instanceName = 'WA'
+test_task = f'{instanceName}_{solver}_Predect&Search'
 if not os.path.isdir(f'./logs'):
     os.mkdir(f'./logs')
-if not os.path.isdir(f'./logs/{TaskName}'):
-    os.mkdir(f'./logs/{TaskName}')
-if not os.path.isdir(f'./logs/{TaskName}/{test_task}'):
-    os.mkdir(f'./logs/{TaskName}/{test_task}')
-log_folder = f'./logs/{TaskName}/{test_task}'
-
-sample_names = sorted(os.listdir(f'./instance/test/{TaskName}'))
+if not os.path.isdir(f'./logs/{instanceName}'):
+    os.mkdir(f'./logs/{instanceName}')
+if not os.path.isdir(f'./logs/{instanceName}/{test_task}'):
+    os.mkdir(f'./logs/{instanceName}/{test_task}')
+log_folder = f'./logs/{instanceName}/{test_task}'
+k_0, k_1, delta = test_hyperparam(instanceName)
+sample_names = sorted(os.listdir(f'./instance/test/{instanceName}'))
 
 subop_total = 0
 time_total = 0
@@ -139,12 +146,15 @@ gp_int_total = 0
 ALL_Test = 30  # 33
 epoch = 1
 TestNum = round(ALL_Test / epoch)
-gp_obj_list = get_gp_best_objective(f'./logs/{TaskName}/{test_task}')
+if not gp_solve:
+    gp_obj_list = get_gp_best_objective(f'./logs/{instanceName}/{test_task}')
+else:
+    gp_obj_list = []
 for e in range(epoch):
     for ins_num in range(TestNum):
         t_start = time()
         test_ins_name = sample_names[(0 + e) * TestNum + ins_num]
-        ins_name_to_read = f'./instance/test/{TaskName}/{test_ins_name}'
+        ins_name_to_read = f'./instance/test/{instanceName}/{test_ins_name}'
         # get bipartite graph as input
         v_class_name, c_class_name = get_pattern("./task_config.json", TaskName)
         A, v_map, v_nodes, c_nodes, b_vars, v_class, c_class, _ = get_bigraph(ins_name_to_read, v_class_name,
@@ -154,7 +164,6 @@ for e in range(epoch):
         variable_features = v_nodes
         constraint_features[torch.isnan(constraint_features)] = 1  # remove nan value
         # variable_features = getPE(v_nodes, position)
-
 
         # if TaskName == "IP":
         #     variable_features = postion_get(variable_features)
@@ -180,10 +189,10 @@ for e in range(epoch):
             variable_features, constraint_features, BD = BD
             plot_logits(variable_features, constraint_features, v_class, c_class)
         BD = BD.cpu().squeeze()
-        pred = BD.detach().numpy()
-        rounding_errors = np.abs(np.round(pred) - pred)
-        m = 0.1
-        top_m_indices = np.argsort(-rounding_errors)[:int(m * len(pred))]
+        # pred = BD.detach().numpy()
+        # rounding_errors = np.abs(np.round(pred) - pred)
+        # m = 0.1
+        # top_m_indices = np.argsort(-rounding_errors)[:int(m * len(pred))]
         # naive_distance = np.sum(np.abs(np.round(pred[top_m_indices]) - label[top_m_indices]))
 
         # align the variable name betweend the output and the solver
@@ -228,16 +237,24 @@ for e in range(epoch):
         # 修复预测初始解，得到初始可行解
         # _, tc_1 = test.project_to_feasible_region_and_get_tight_constraints(m, x_pred)
 
-        m.Params.TimeLimit = 800
-        m.Params.Threads = 32
+        m.Params.TimeLimit = TimeLimit
+        m.Params.Threads = Threads
         m.Params.MIPFocus = 1
         m.Params.LogFile = f'{log_folder}/{test_ins_name}.log'
         gurobipy.setParam('LogToConsole', 1)
 
         if gp_solve:
             primal_integral_callback.gap_records = []
+            output_folder = f"./logs/{instanceName}/{TaskName}_GRB_sols"
+            os.makedirs(output_folder, exist_ok=True)
+            output_file = os.path.join(output_folder, f"{test_ins_name}.sol")
             m.optimize(primal_integral_callback)
             obj = m.objVal
+            integer_sols = [v.x for v in m.getVars() if v.vType in ['I', 'B']]
+            if m.status in [GRB.OPTIMAL, GRB.TIME_LIMIT]:
+                with open(output_file, "wb") as f:
+                    pickle.dump(integer_sols, f)
+
             gap_records = primal_integral_callback.gap_records
             primal_integral = 0.0
             if len(gap_records) > 1:
@@ -252,8 +269,8 @@ for e in range(epoch):
             obj = gp_obj_list[(0 + e) * TestNum + ins_num]
         print("gurobi 最优解：", obj)
         m.reset()
-        m.Params.TimeLimit = 800
-        m.Params.Threads = 32
+        m.Params.TimeLimit = TimeLimit
+        m.Params.Threads = Threads
         m.Params.MIPFocus = 1
 
         # trust region method implemented by adding constraints
