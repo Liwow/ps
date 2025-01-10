@@ -16,7 +16,7 @@ torch.backends.cudnn.benchmark = True
 # this file is to train a predict model. given a instance's bipartite graph as input, the model predict the binary distribution.
 
 # train task
-TaskName = "CA"
+TaskName = "WA"
 multimodal = False
 position = False
 warnings.filterwarnings("ignore")
@@ -36,8 +36,8 @@ log_file = open(f'{log_save_path}{train_task}_train.log', 'wb')
 
 # set params
 LEARNING_RATE = 0.001
-NB_EPOCHS = 50
-BATCH_SIZE = 2
+NB_EPOCHS = 20
+BATCH_SIZE = 1
 NUM_WORKERS = 0
 WEIGHT_NORM = 100
 

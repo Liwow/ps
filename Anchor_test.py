@@ -1,10 +1,10 @@
 import pickle
-
 import gurobipy
 import json
 from gurobipy import GRB
 from get_logits import plot_logits
 import utils
+from utils import test_hyperparam
 import helper
 import gp_tools
 import gc
@@ -15,7 +15,7 @@ import torch
 from time import time
 from helper import get_a_new2, get_bigraph, get_pattern
 from GCN_class import getPE
-from gp_tools import primal_integral_callback, get_gp_best_objective
+from gp_tools import primal_integral_callback, get_gp_best_objective, pred_error
 
 # def modify(model, n=0, k=0, fix=0):
 #     # fix 0:no fix 1:随机 2:排序 3: 交集
@@ -69,7 +69,7 @@ position = False
 gp_solve = False
 Threads = 24
 TimeLimit = 800
-ModelName = "WA_anchor2"
+ModelName = "CA_anchor"
 model_name = f'{ModelName}.pth'
 if ModelName == "CA_multi":
     multimodal = True
@@ -77,7 +77,6 @@ if ModelName == "CA_multi":
 if ModelName.startswith("IP"):
     # Add position embedding for IP model, due to the strong symmetry
     from GCN import GNNPolicy_position as GNNPolicy, postion_get
-
     position = True
 elif multimodal:
     from GCN import GNNPolicy_multimodal as GNNPolicy
@@ -86,36 +85,7 @@ else:
     from GCN_class import GNNPolicy_class as GNNPolicy
 
 
-def test_hyperparam(task):
-    '''
-    set the hyperparams
-    k_0, k_1, delta
-    '''
-    if task == "IP":
-        return 400, 5, 10
-    elif task == "IS":
-        return 300, 300, 20
-    elif task == "WA":  # 0, 500, 10
-        return 0, 500, 10
-    elif task == "CA":  # 600 0 1
-        return 600, 0, 1
-    elif task == "CA_big":
-        return 1000, 0, 5
-    elif task == "beasley":
-        return 50, 17, 10
-    elif task == "ns":
-        return 120, 18, 20
-    elif task == "binkar":
-        return 54, 24, 10
-    elif task == "neos":
-        return 20129, 569, 700  # 20741 609
-    elif task == "mas":
-        return 136, 14, 10
-    elif task == "markshare":
-        return 14, 12, 9
-
-
-TaskName = 'WA'
+TaskName = ModelName.split("_")[0]
 pathstr = f'./models/{model_name}'
 policy = GNNPolicy(TaskName, position=position).to(DEVICE)
 state = torch.load(pathstr, map_location=DEVICE)
@@ -124,7 +94,7 @@ policy.eval()
 
 # set log folder
 solver = 'GRB'
-instanceName = 'WA'
+instanceName = 'CA_big'
 test_task = f'{instanceName}_{solver}_Predect&Search'
 if not os.path.isdir(f'./logs'):
     os.mkdir(f'./logs')
@@ -142,8 +112,8 @@ max_subop = -1
 max_time = 0
 ps_int_total = 0
 gp_int_total = 0
-
-ALL_Test = 30  # 33
+acc = 0
+ALL_Test = 30  # 30/60
 epoch = 1
 TestNum = round(ALL_Test / epoch)
 if not gp_solve:
@@ -189,11 +159,6 @@ for e in range(epoch):
             variable_features, constraint_features, BD = BD
             plot_logits(variable_features, constraint_features, v_class, c_class)
         BD = BD.cpu().squeeze()
-        # pred = BD.detach().numpy()
-        # rounding_errors = np.abs(np.round(pred) - pred)
-        # m = 0.1
-        # top_m_indices = np.argsort(-rounding_errors)[:int(m * len(pred))]
-        # naive_distance = np.sum(np.abs(np.round(pred[top_m_indices]) - label[top_m_indices]))
 
         # align the variable name betweend the output and the solver
         all_varname = []
@@ -250,7 +215,11 @@ for e in range(epoch):
             output_file = os.path.join(output_folder, f"{test_ins_name}.sol")
             m.optimize(primal_integral_callback)
             obj = m.objVal
-            integer_sols = [v.x for v in m.getVars() if v.vType in ['I', 'B']]
+            integer_sols = sorted(
+                [(v.varName, v.x) for v in m.getVars() if v.vType in ['I', 'B']],  # 获取变量名和值
+                key=lambda x: x[0]  # 按变量名字典序排序
+            )
+            integer_sols = [value for _, value in integer_sols]
             if m.status in [GRB.OPTIMAL, GRB.TIME_LIMIT]:
                 with open(output_file, "wb") as f:
                     pickle.dump(integer_sols, f)
@@ -267,7 +236,10 @@ for e in range(epoch):
             print("gp_int_total：", gp_int_total)
         else:
             obj = gp_obj_list[(0 + e) * TestNum + ins_num]
-        print("gurobi 最优解：", obj)
+
+        error = pred_error(scores, test_ins_name, instanceName, delta)
+        acc = acc + 1 if error <= delta else acc
+        print(f"gurobi 最优解：{obj}; pred_error is: {error}")
         m.reset()
         m.Params.TimeLimit = TimeLimit
         m.Params.Threads = Threads
@@ -296,7 +268,11 @@ for e in range(epoch):
         m.addConstr(all_tmp <= delta, name="sum_alpha")
         m.update()
         primal_integral_callback.gap_records = []
-        m.optimize(primal_integral_callback)
+        if 0:
+            m.optimize(primal_integral_callback)
+            pre_obj = m.objVal
+        else:
+            pre_obj = 0
         gap_records = primal_integral_callback.gap_records
         primal_integral = 0.0
         if len(gap_records) > 1:
@@ -314,14 +290,12 @@ for e in range(epoch):
 
         t = time() - t_start
         time_total += t
-        pre_obj = m.objVal
         if max_time <= t:
             max_time = t
         if m.status in [GRB.OPTIMAL, GRB.TIME_LIMIT]:
             subop = (pre_obj - obj) / (obj + 1e-8) if TaskName != "CA" else (obj - pre_obj) / (obj + 1e-8)
             subop_total += subop
-            print(
-                f"ps 最优值：{pre_obj}; subopt: {round(subop, 4)}; subop_total: {round(subop_total / (ins_num + 1), 4)}")
+            print(f"ps 最优值：{pre_obj}; subopt: {round(subop, 4)}; subop_total: {round(subop_total / (ins_num + 1), 4)}; pred_error: {round(acc / (ins_num + 1), 4)}")
         m.dispose()
         gc.collect()
 
@@ -340,3 +314,4 @@ with open(results_dir + "results.json", "a") as file:
     json.dump(results, file)
 print("avg_subopt： ", results['avg_subopt'])
 print("ps_gap_integral： ", results['ps_gap_integral'])
+print(f"pred_error: {round(acc / total_num, 4)}")

@@ -38,7 +38,7 @@ log_file = open(f'{log_save_path}{train_task}_train.log', 'wb')
 # set params
 LEARNING_RATE = 0.001
 NB_EPOCHS = 100
-BATCH_SIZE = 2
+BATCH_SIZE = 1
 NUM_WORKERS = 0
 WEIGHT_NORM = 100
 

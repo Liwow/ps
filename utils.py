@@ -107,32 +107,6 @@ def convert_class_to_labels(class_, n):
     return labels
 
 
-def test_hyperparam(task):
-    '''
-    set the hyperparams
-    k_0, k_1, delta
-    '''
-    if task == "IP":
-        return 400, 5, 10
-    elif task == "IS":
-        return 300, 300, 20
-    elif task == "WA":  # 0, 500, 10
-        return 0, 500, 10
-    elif task == "CA" or task == "CA_m":  # 600 0 1
-        return 600, 0, 1
-    elif task == "beasley":
-        return 50, 17, 10
-    elif task == "ns":
-        return 120, 18, 20
-    elif task == "binkar":
-        return 54, 24, 10
-    elif task == "neos":
-        return 20129, 569, 700  # 20741 609
-    elif task == "mas":
-        return 136, 14, 10
-    elif task == "markshare":
-        return 14, 12, 9
-
 
 def compare(pre_sol, sols, task, u=None):
     # m 1 n 0
@@ -166,3 +140,32 @@ def compare(pre_sol, sols, task, u=None):
     # print(f"m 1 ratio: {top_m_ratio}, n 0 ratio: {bottom_n_ratio}, Total best ratio: {best radio}")
 
     return best_radio
+
+
+def test_hyperparam(task):
+    '''
+    set the hyperparams
+    k_0, k_1, delta
+    '''
+    if task == "IP":
+        return 400, 5, 10
+    elif task == "IS":
+        return 300, 300, 20
+    elif task == "WA":  # 0, 500, 10
+        return 0, 500, 10
+    elif task == "CA":  # 600 0 1
+        return 600, 0, 1
+    elif task == "CA_big":  # 1000 0 1
+        return 1200, 0, 2
+    elif task == "beasley":
+        return 50, 17, 10
+    elif task == "ns":
+        return 120, 18, 20
+    elif task == "binkar":
+        return 54, 24, 10
+    elif task == "neos":
+        return 20129, 569, 700  # 20741 609
+    elif task == "mas":
+        return 136, 14, 10
+    elif task == "markshare":
+        return 14, 12, 9

@@ -1,5 +1,6 @@
 import json
 import os
+import pickle
 import re
 import shutil
 import gurobipy as gp
@@ -348,6 +349,26 @@ def primal_integral_callback(model, where):
             primal_integral_callback.gap_records.append((time_elapsed, primal_gap))
 
 
+def pred_error(scores, ins_name_to_read, InstanceName, delta):
+    TaskName = ins_name_to_read.split('_')[0]
+    sols_files = f"./logs/{InstanceName}/{TaskName}_GRB_sols"
+    sols_file = sols_files + "/" + ins_name_to_read + ".sol"
+    with open(sols_file, 'rb') as f:
+        sols = pickle.load(f)
+
+    sorted_scores = sorted(scores, key=lambda x: x[0])
+    total_count = 0
+    correct_count = 0
+    for score, sol in zip(sorted_scores, sols):
+        variable_value = score[3]  # scores 中的变量值
+        if variable_value in [0, 1]:  # 排除 -1 的情况
+            total_count += 1
+            if variable_value == sol:  # 比较值是否相同
+                correct_count += 1
+            else:
+                continue
+    error = total_count - correct_count
+    return error
 
 
 if __name__ == "__main__":
