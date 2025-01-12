@@ -67,6 +67,7 @@ torch.cuda.manual_seed(0)
 multimodal = False
 position = False
 gp_solve = False
+ps_solve = False
 Threads = 24
 TimeLimit = 800
 ModelName = "CA_anchor"
@@ -84,7 +85,6 @@ else:
     # from GCN import GNNPolicy as GNNPolicy
     from GCN_class import GNNPolicy_class as GNNPolicy
 
-
 TaskName = ModelName.split("_")[0]
 pathstr = f'./models/{model_name}'
 policy = GNNPolicy(TaskName, position=position).to(DEVICE)
@@ -94,7 +94,7 @@ policy.eval()
 
 # set log folder
 solver = 'GRB'
-instanceName = 'CA_big'
+instanceName = 'CA'
 test_task = f'{instanceName}_{solver}_Predect&Search'
 if not os.path.isdir(f'./logs'):
     os.mkdir(f'./logs')
@@ -113,6 +113,7 @@ max_time = 0
 ps_int_total = 0
 gp_int_total = 0
 acc = 0
+mse_total = 0
 ALL_Test = 30  # 30/60
 epoch = 1
 TestNum = round(ALL_Test / epoch)
@@ -237,9 +238,10 @@ for e in range(epoch):
         else:
             obj = gp_obj_list[(0 + e) * TestNum + ins_num]
 
-        error = pred_error(scores, test_ins_name, instanceName, delta)
+        error, mse = pred_error(scores, test_ins_name, instanceName, BD)
         acc = acc + 1 if error <= delta else acc
-        print(f"gurobi 最优解：{obj}; pred_error is: {error}")
+        mse_total += mse
+        print(f"gurobi 最优解：{obj}; pred_error is: {error}; mse is: {mse}")
         m.reset()
         m.Params.TimeLimit = TimeLimit
         m.Params.Threads = Threads
@@ -268,7 +270,7 @@ for e in range(epoch):
         m.addConstr(all_tmp <= delta, name="sum_alpha")
         m.update()
         primal_integral_callback.gap_records = []
-        if 0:
+        if ps_solve:
             m.optimize(primal_integral_callback)
             pre_obj = m.objVal
         else:
@@ -295,7 +297,8 @@ for e in range(epoch):
         if m.status in [GRB.OPTIMAL, GRB.TIME_LIMIT]:
             subop = (pre_obj - obj) / (obj + 1e-8) if TaskName != "CA" else (obj - pre_obj) / (obj + 1e-8)
             subop_total += subop
-            print(f"ps 最优值：{pre_obj}; subopt: {round(subop, 4)}; subop_total: {round(subop_total / (ins_num + 1), 4)}; pred_error: {round(acc / (ins_num + 1), 4)}")
+            print(
+                f"ps 最优值：{pre_obj}; subopt: {round(subop, 4)}; subop_total: {round(subop_total / (ins_num + 1), 4)}; pred_error: {round(acc / (ins_num + 1), 4)}")
         m.dispose()
         gc.collect()
 
@@ -306,6 +309,7 @@ results = {
     "max_time": round(max_time, 6),
     "gurobi_integral": round(gp_int_total / total_num, 6),
     "ps_gap_integral": round(ps_int_total / total_num, 6),
+
 }
 results_dir = f"/home/ljj/project/predict_and_search/results/{TaskName}/"
 if not os.path.isdir(results_dir):
@@ -315,3 +319,4 @@ with open(results_dir + "results.json", "a") as file:
 print("avg_subopt： ", results['avg_subopt'])
 print("ps_gap_integral： ", results['ps_gap_integral'])
 print(f"pred_error: {round(acc / total_num, 4)}")
+print(f"mse: {round(mse_total / total_num, 4)}")

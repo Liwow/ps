@@ -7,7 +7,7 @@ import torch.nn as nn
 import torch_geometric
 import pickle
 import numpy as np
-from GCN import getPE, SELayerGraph, BipartiteGraphConvolution
+from GCN import getPE, SELayerGraph
 import pyscipopt as scip
 import utils
 
@@ -374,8 +374,8 @@ def get_by_semantics(task, tokenizer, text_encoder):
     # edge为抽象模型边的索引，edge_feature为边的特征
     var_fea = []
     con_fea = []
-    edge = []
-    edge_feature = []
+    edge_idx = []
+    edge_features = []
     config_path = './task_config.json'
     with open(config_path, 'r') as f:
         config_json = json.load(f)
@@ -419,7 +419,18 @@ def get_by_semantics(task, tokenizer, text_encoder):
         con_fea.append(text_embedding)
     con_fea = torch.stack(con_fea)
 
-    return var_fea, con_fea, edge, edge_feature
+    edges = task_details["edges"]
+    for edge in edges:
+        source = int(edge["source"])
+        target = int(edge["target"])
+        edge_feature = edge["feature"]
+        edge_idx.append([source, target])
+        edge_features.append(edge_feature)
+
+    edge_idx = torch.tensor(edge_idx).t()
+    edge_features = torch.tensor(edge_features).unsqueeze(0)
+
+    return var_fea, con_fea, edge_idx, edge_features
 
 
 class AnchorGNN(torch.nn.Module):
@@ -437,10 +448,11 @@ class AnchorGNN(torch.nn.Module):
         self.c_sem_fea = con_fea
         # self.c_sem_fea = nn.parameter.Parameter(con_fea, requires_grad=True)
         self.c_n_class = con_fea.shape[0]
-        self.edge = edge
+        self.edge_idx = edge
         self.edge_fea = edge_feature
 
         self.self_att = torch.nn.MultiheadAttention(self.emb_size, num_heads=4, batch_first=False)
+        # self.high_conv = BipartiteGraphConvolution()
 
         self.proj_var = torch.nn.Sequential(
             torch.nn.Linear(768, 2 * emb_size),
@@ -465,11 +477,12 @@ class AnchorGNN(torch.nn.Module):
         c = self.layer_norm(c)
         v_sem_fea = self.proj_var(self.v_sem_fea)
         c_sem_fea = self.proj_con(self.c_sem_fea)
-        fea = torch.concat([v_sem_fea, c_sem_fea], dim=0)
-        fea_sem = self.self_att(fea, fea, fea)[0]
-        fea_sem = self.layer_norm(fea_sem + fea).squeeze(1)
-        v_sem = fea_sem[:self.v_n_class]
-        c_sem = fea_sem[-self.c_n_class:]
+        if not mpnn:
+            fea = torch.concat([v_sem_fea, c_sem_fea], dim=0)
+            fea_sem = self.self_att(fea, fea, fea)[0]
+            fea_sem = self.layer_norm(fea_sem + fea).squeeze(1)
+            v_sem = fea_sem[:self.v_n_class]
+            c_sem = fea_sem[-self.c_n_class:]
 
         v_s, c_s = self.anchor(v, c, v_sem, c_sem, v_class, c_class)
 

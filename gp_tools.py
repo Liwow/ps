@@ -349,8 +349,8 @@ def primal_integral_callback(model, where):
             primal_integral_callback.gap_records.append((time_elapsed, primal_gap))
 
 
-def pred_error(scores, ins_name_to_read, InstanceName, delta):
-    TaskName = ins_name_to_read.split('_')[0]
+def pred_error(scores, ins_name_to_read, InstanceName, BD=None):
+    TaskName = InstanceName.split('_')[0]
     sols_files = f"./logs/{InstanceName}/{TaskName}_GRB_sols"
     sols_file = sols_files + "/" + ins_name_to_read + ".sol"
     with open(sols_file, 'rb') as f:
@@ -368,7 +368,12 @@ def pred_error(scores, ins_name_to_read, InstanceName, delta):
             else:
                 continue
     error = total_count - correct_count
-    return error
+    if BD is None:
+        return error
+    else:
+        sols_tensor = torch.tensor(sols)
+        mse = torch.mean((BD - sols_tensor) ** 2)
+        return error, mse
 
 
 if __name__ == "__main__":

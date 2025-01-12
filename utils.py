@@ -169,3 +169,15 @@ def test_hyperparam(task):
         return 136, 14, 10
     elif task == "markshare":
         return 14, 12, 9
+    elif task == "case118":  # 10000,1164,18878
+        return 2000, 0, 100
+    elif task == "case300":  # 13137,1767,22470
+        return 2000, 0, 100
+    elif task == "case1951rte":  # 80000, 2000, 15w
+        return 20000, 50, 300
+    elif task == "case6515rte":
+        return 50000, 1200, 1200
+    elif task == "case2868rte":
+        return 30000, 50, 500
+    elif task == "case2869pegase":
+        return 22000, 50, 600

@@ -8,12 +8,14 @@ import time
 import warnings
 from torch.optim.lr_scheduler import LambdaLR
 from tqdm import tqdm
-
 import utils
-
+seed = 3042
+random.seed(seed)
+torch.manual_seed(seed)
+torch.cuda.manual_seed(seed)
 torch.backends.cudnn.enabled = True
 torch.backends.cudnn.benchmark = True
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+DEVICE = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 # this file is to train a predict model. given a instance's bipartite graph as input, the model predict the binary distribution.
 
 # 4 public datasets, IS, WA, CA, IP
@@ -43,7 +45,6 @@ WEIGHT_NORM = 100
 
 # dataset task
 TaskName = "case118"
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 DIR_BG = f'./dataset/{TaskName}/BG'
 DIR_SOL = f'./dataset/{TaskName}/solution'
 sample_names = os.listdir(DIR_BG)
@@ -72,7 +73,7 @@ PredictModel = GNNPolicy(TaskName).to(DEVICE)
 
 
 def lr_lambda(epoch):
-    return 0.99 ** ((epoch + 1) // 5)
+    return 0.95 ** ((epoch + 1) // 5)
 
 
 def EnergyWeightNorm(task):
@@ -110,11 +111,12 @@ def train(predict, data_loader, epoch, optimizer=None, weight_norm=1):
         predict.eval()
         desc = "Valid "
     mean_loss = 0
+    mean_acc = 0
     n_samples_processed = 0
     with torch.set_grad_enabled(optimizer is not None):
         for step, batch in enumerate(tqdm(data_loader, desc=f"{desc}Epoch {epoch}")):
             batch = batch.to(DEVICE)
-            accumulation_steps = 4
+            accumulation_steps = 1
             # get target solutions in list format
             solInd = batch.nsols
             con_num = batch.ncons
@@ -193,7 +195,6 @@ def train(predict, data_loader, epoch, optimizer=None, weight_norm=1):
                 neg_loss = -(1 - pre_cons + 1e-8).log()[None, :] * (labels == 0).float()
                 masked_con_loss = (pos_loss + neg_loss) * weight[:, None]
                 # masked_con_loss = utils.focal_loss(pre_cons, labels, weight)
-
                 # pos_loss = -(pre_t + 1e-8).log()[None, :] * (tights == 1).float()
                 # neg_loss = -(1 - pre_t + 1e-8).log()[None, :] * (tights == 0).float()
                 # tight_loss = (pos_loss + neg_loss) * weight[:, None]
@@ -215,6 +216,9 @@ def train(predict, data_loader, epoch, optimizer=None, weight_norm=1):
                 sols_loss_sg = sample_sols_loss.sum().detach()
                 loss += (sample_sols_loss.sum() / sols_loss_sg)
                 record_loss += sols_loss_sg
+
+                acc = utils.compare(pre_sols, sols, TaskName)
+                mean_acc += acc
             if optimizer is not None:
                 loss.backward()
             if optimizer is not None and (step + 1) % accumulation_steps == 0:
@@ -226,8 +230,9 @@ def train(predict, data_loader, epoch, optimizer=None, weight_norm=1):
             mean_loss += record_loss.item()
             n_samples_processed += batch.num_graphs
     mean_loss /= n_samples_processed
+    mean_acc /= n_samples_processed
 
-    return mean_loss
+    return mean_loss, mean_acc
 
 
 optimizer = torch.optim.Adam(PredictModel.parameters(), lr=LEARNING_RATE, weight_decay=1e-4)
@@ -237,13 +242,14 @@ best_val_loss = 99999
 for epoch in range(NB_EPOCHS):
 
     begin = time.time()
-    train_loss = train(PredictModel, train_loader, epoch, optimizer, weight_norm)
+    train_loss, train_acc = train(PredictModel, train_loader, epoch, optimizer, weight_norm)
     scheduler.step()
-    print(f"Epoch {epoch} Train loss: {train_loss:0.3f}")
-    valid_loss = train(PredictModel, valid_loader, epoch, None, weight_norm)
-    print(f"Epoch {epoch} Valid loss: {valid_loss:0.3f}")
+    print(f"Epoch {epoch} Train loss: {train_loss:0.3f} Train acc: {train_acc:0.6f}")
+    valid_loss, valid_acc = train(PredictModel, valid_loader, epoch, None, weight_norm)
+    print(f"Epoch {epoch} Valid loss: {valid_loss:0.3f} Valid acc: {valid_acc:0.6f}")
     if valid_loss < best_val_loss:
         best_val_loss = valid_loss
+        print(f"Save model at epoch {epoch}, best valid loss: {best_val_loss}\n")
         torch.save(PredictModel.state_dict(), model_save_path + 'model_best.pth')
     torch.save(PredictModel.state_dict(), model_save_path + 'model_last.pth')
     st = f'@epoch{epoch}   Train loss:{train_loss}   Valid loss:{valid_loss}    TIME:{time.time() - begin}\n'
