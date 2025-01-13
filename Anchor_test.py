@@ -270,11 +270,13 @@ for e in range(epoch):
         m.addConstr(all_tmp <= delta, name="sum_alpha")
         m.update()
         primal_integral_callback.gap_records = []
+
         if ps_solve:
             m.optimize(primal_integral_callback)
             pre_obj = m.objVal
         else:
             pre_obj = 0
+
         gap_records = primal_integral_callback.gap_records
         primal_integral = 0.0
         if len(gap_records) > 1:
@@ -307,16 +309,16 @@ results = {
     "avg_subopt": round(subop_total / total_num, 6),
     "mean_time_pred": round(time_total / total_num, 6),
     "max_time": round(max_time, 6),
-    "gurobi_integral": round(gp_int_total / total_num, 6),
-    "ps_gap_integral": round(ps_int_total / total_num, 6),
-
+    "gurobi_integral": round(gp_int_total / total_num, 6) if gp_solve else 0,
+    "ps_gap_integral": round(ps_int_total / total_num, 6) if ps_solve else 0,
 }
 results_dir = f"/home/ljj/project/predict_and_search/results/{TaskName}/"
 if not os.path.isdir(results_dir):
     os.makedirs(results_dir)
 with open(results_dir + "results.json", "a") as file:
     json.dump(results, file)
+    file.write("\n")
 print("avg_subopt： ", results['avg_subopt'])
 print("ps_gap_integral： ", results['ps_gap_integral'])
 print(f"pred_error: {round(acc / total_num, 4)}")
-print(f"mse: {round(mse_total / total_num, 4)}")
+print(f"mse: {mse_total / total_num}")

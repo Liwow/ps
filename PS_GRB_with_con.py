@@ -131,7 +131,7 @@ def modify_by_predict(model, predict, k=0, fix=0, th=30, n=0):
         "fixed_constraints_name": fixed_constraints,
         "wrong_indices": wrong_indices[:200]
     }
-    if not os.path.exists(f"{TaskName}_{test_ins_name.split('.')[0]}.json"):
+    if not os.path.exists(f"{results_dir}/{TaskName}_{test_ins_name.split('.')[0]}.json"):
         print("store tight")
         with open(f"{results_dir}/{TaskName}_{test_ins_name.split('.')[0]}.json", "w") as data_file:
             json.dump(data_to_save, data_file, ensure_ascii=False, indent=4)
@@ -398,6 +398,7 @@ results = {
 
 with open(results_dir + "results.json", "a") as file:
     json.dump(results, file)
+    file.write("\n")
 
 print("avg_time_pred_ps: ", results['mean_time_pred_ps'])
 print("avg_time_solver: ", results['mean_time_solver'])

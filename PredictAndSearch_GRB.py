@@ -70,6 +70,7 @@ torch.cuda.manual_seed(0)
 edl = False
 position = False
 gp_solve = False
+ps_solve = False
 Threads = 24
 TimeLimit = 800
 # edl, ca
@@ -98,7 +99,7 @@ policy.eval()
 
 # set log folder
 solver = 'GRB'
-instanceName = "CA_big"
+instanceName = "CA"
 test_task = f'{instanceName}_{solver}_Predect&Search'
 if not os.path.isdir(f'./logs'):
     os.mkdir(f'./logs')
@@ -117,6 +118,7 @@ max_time = 0
 ps_int_total = 0
 gp_int_total = 0
 acc = 0
+mse_total = 0
 ALL_Test = 30  # 33
 epoch = 1
 TestNum = round(ALL_Test / epoch)
@@ -154,7 +156,7 @@ for e in range(epoch):
         )
         if edl:
             BD = policy.get_p(BD)
-        BD = BD[0].cpu().squeeze()
+        BD = BD[0].cpu().squeeze().sigmoid()
 
         # align the variable name betweend the output and the solver
         all_varname = []
@@ -232,9 +234,10 @@ for e in range(epoch):
             print("gp_int_total：", gp_int_total)
         else:
             obj = gp_obj_list[(0 + e) * TestNum + ins_num]
-        error = pred_error(scores, test_ins_name, instanceName, delta)
+        error, mse = pred_error(scores, test_ins_name, instanceName, BD)
         acc = acc + 1 if error <= delta else acc
-        print(f"gurobi 最优解：{obj}; pred_error is: {error}")
+        mse_total += mse
+        print(f"gurobi 最优解：{obj}; pred_error is: {error}; mse is: {mse}")
         m.reset()
         m.Params.TimeLimit = TimeLimit
         m.Params.Threads = Threads
@@ -263,7 +266,7 @@ for e in range(epoch):
         m.addConstr(all_tmp <= delta, name="sum_alpha")
         m.update()
         primal_integral_callback.gap_records = []
-        if 0:
+        if ps_solve:
             m.optimize(primal_integral_callback)
             pre_obj = m.objVal
         else:
@@ -299,14 +302,16 @@ results = {
     "avg_subopt": round(subop_total / total_num, 6),
     "mean_time_pred": round(time_total / total_num, 6),
     "max_time": round(max_time, 6),
-    "gurobi_integral": round(gp_int_total / total_num, 6),
-    "ps_gap_integral": round(ps_int_total / total_num, 6),
+    "gurobi_integral": round(gp_int_total / total_num, 6) if gp_solve else 0,
+    "ps_gap_integral": round(ps_int_total / total_num, 6) if ps_solve else 0,
 }
 results_dir = f"/home/ljj/project/predict_and_search/results/{TaskName}/"
 if not os.path.isdir(results_dir):
     os.makedirs(results_dir)
 with open(results_dir + "results.json", "a") as file:
     json.dump(results, file)
+    file.write("\n")
 print("avg_subopt： ", results['avg_subopt'])
 print("ps_gap_integral： ", results['ps_gap_integral'])
 print(f"pred_error: {round(acc / total_num, 4)}")
+print(f"mse: {mse_total / total_num}")
