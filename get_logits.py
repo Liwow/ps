@@ -1,74 +1,9 @@
-import torch_geometric
+
 from matplotlib import pyplot as plt
 from sklearn.decomposition import PCA
 from openTSNE import TSNE
-import utils
-import helper
 from umap import UMAP
-import gc
-import random
-import os
 import numpy as np
-import torch
-from helper import get_a_new2, get_bigraph, get_pattern
-from GCN_class import getPE
-from gp_tools import primal_integral_callback, get_gp_best_objective
-
-
-# DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-# random.seed(0)
-# torch.manual_seed(0)
-# torch.cuda.manual_seed(0)
-# multimodal = False
-# TaskName = "CA"
-# model_name = f'{TaskName}.pth'
-# if TaskName == "CA_multi":
-#     multimodal = True
-# # load pretrained model
-# if TaskName == "IP":
-#     # Add position embedding for IP model, due to the strong symmetry
-#     from GCN import GNNPolicy_position as GNNPolicy, postion_get
-#     from GCN import GraphDataset_position as GraphDataset
-#     from GCN_class import GraphDataset_class
-# elif multimodal:
-#     from GCN import GNNPolicy_multimodal as GNNPolicy
-# else:
-#     from GCN import GNNPolicy as GNNPolicy
-#     from GCN import GraphDataset
-#     from GCN_class import GraphDataset_class
-#     # from GCN_class import GNNPolicy_class as GNNPolicy
-#
-# TaskName = 'CA'
-# position = False
-# gp_solve = False
-# pathstr = f'./models/{model_name}'
-# policy = GNNPolicy(TaskName, position=position).to(DEVICE)
-# state = torch.load(pathstr, map_location=DEVICE)
-# policy.load_state_dict(state)
-# policy.eval()
-#
-# DIR_BG = f'./dataset/{TaskName}/BG'
-# DIR_SOL = f'./dataset/{TaskName}/solution'
-# sample_names = os.listdir(DIR_BG)
-# sample_files = [(os.path.join(DIR_BG, name), os.path.join(DIR_SOL, name).replace('bg', 'sol')) for name in sample_names]
-# train_files, valid_files = utils.split_sample_by_blocks(sample_files, 0.9, block_size=100)
-# valid_data = GraphDataset(valid_files, position=position)
-# valid_loader = torch_geometric.loader.DataLoader(valid_data, batch_size=1, shuffle=False)
-#
-# batch = next(iter(valid_loader))
-#
-# valid_data_class = GraphDataset_class(valid_files, position=position)
-# batch_class = next(iter(valid_data_class))
-# v_class = batch_class.v_class
-# c_class = batch_class.c_class
-
-# prediction
-# _, v_logits, c_logits = policy(
-#     batch.constraint_features.to(DEVICE),
-#     batch.edge_index.to(DEVICE),
-#     batch.edge_attr.to(DEVICE),
-#     batch.variable_features.to(DEVICE),
-# )
 
 
 def reduce_dimensions(data, method='tsne', n_components=2):
@@ -132,5 +67,10 @@ def plot_logits(v_logits, c_logits, v_class, c_class):
     plt.show()
 
     plot_embeddings_combined(v_embeddings, c_embeddings, v_class, c_class, "Combined V and C Nodes")
+
+
+if __name__ == "__main__":
+    pass
+
 
 

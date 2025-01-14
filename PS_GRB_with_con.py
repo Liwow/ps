@@ -17,7 +17,8 @@ import logging
 
 # todo device设置，需要与model统一
 DEVICE = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
-
+Threads = 18
+TimeLimit = 1000
 
 # def modify(model, n=0, k=0, fix=0):
 #     # fix 0:no fix 1:随机 2:排序 3: 交集
@@ -142,7 +143,7 @@ random.seed(0)
 torch.manual_seed(0)
 torch.cuda.manual_seed(0)
 multimodal = False
-is_solver = False
+is_solver = True
 # TaskName = "CA_m_ccon"
 TaskName = "case118"
 if TaskName == "CA_multi":
@@ -164,7 +165,7 @@ policy.load_state_dict(state)
 
 policy.eval()
 # todo 在这里修改测试数据集 case1951rte case2868rte case2869pegase
-TaskName = 'case2869pegase'
+TaskName = 'case1951rte'
 
 
 def test_hyperparam(task):
@@ -319,7 +320,8 @@ for e in range(epoch):
         # _, tc_1 = test.project_to_feasible_region_and_get_tight_constraints(m, x_pred)
         # o_m = m.copy()
         # todo 下面是grb的代码，需要修改为optv
-        m.Params.TimeLimit = 1000
+        m.Params.TimeLimit = TimeLimit
+        m.Params.Threads = Threads
         m.Params.MIPFocus = 1
         gurobipy.setParam('LogToConsole', 1)
         log_file = f'{log_folder}/{test_ins_name}.log'
@@ -345,6 +347,7 @@ for e in range(epoch):
             obj = gp_obj_list[(0 + e) * TestNum + ins_num] if len(gp_obj_list) > 0 else 0
         time_totol_solver += (time() - t_start_1)
 
+        # todo 这里是计算预测误差，可以注释掉
         error = gp_tools.pred_error(scores, test_ins_name, TaskName)
         acc = acc + 1 if error <= delta else acc
         print(f"gurobi 最优解：{obj}; pred_error is: {error}")
@@ -359,7 +362,8 @@ for e in range(epoch):
         m = gp_tools.search(m, scores, delta)
         # todo 求解，需要改为optv
         m.update()
-        m.Params.TimeLimit = 1000
+        m.Params.TimeLimit = TimeLimit
+        m.Params.Threads = Threads
         m.Params.MIPFocus = 1
         t_start_2 = time()
         m.optimize()

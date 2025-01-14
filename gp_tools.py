@@ -3,11 +3,19 @@ import os
 import pickle
 import re
 import shutil
+import random
+from time import time
 import gurobipy as gp
 import torch
 import numpy as np
 from gurobipy import GRB
-from helper import map_model_to_filtered_indices
+import utils
+from helper import map_model_to_filtered_indices, get_a_new2, get_pattern, get_bigraph
+
+DEVICE = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+random.seed(0)
+torch.manual_seed(0)
+torch.cuda.manual_seed(0)
 
 
 def ss():
@@ -349,10 +357,10 @@ def primal_integral_callback(model, where):
             primal_integral_callback.gap_records.append((time_elapsed, primal_gap))
 
 
-def pred_error(scores, ins_name_to_read, InstanceName, BD=None):
+def pred_error(scores, test_ins_name, InstanceName, BD=None):
     TaskName = InstanceName.split('_')[0]
     sols_files = f"./logs/{InstanceName}/{TaskName}_GRB_sols"
-    sols_file = sols_files + "/" + ins_name_to_read + ".sol"
+    sols_file = sols_files + "/" + test_ins_name + ".sol"
     with open(sols_file, 'rb') as f:
         sols = pickle.load(f)
 
@@ -377,25 +385,160 @@ def pred_error(scores, ins_name_to_read, InstanceName, BD=None):
 
 
 if __name__ == "__main__":
-    file = "./instance/test/CA/CA_69.lp"
-    log_file = "./logs/CA/CA_GRB_Predect&Search"
-    # main(file, n=0, m=30)
-    primal_integral_callback.gap_records = []
+    anchor = False
+    position = False
+    gp_solve = False
+    _type = "sol"  # "sol" or "obj"
+    Threads = 24
+    TimeLimit = 800
+    ModelName = "CA"
+    model_name = f'{ModelName}.pth'
+    if ModelName == "CA_anchor":
+        anchor = True
+    # load pretrained model
+    if ModelName.startswith("IP"):
+        # Add position embedding for IP model, due to the strong symmetry
+        from GCN import GNNPolicy_position as GNNPolicy, postion_get
 
-    # 创建模型并优化
-    model = gp.read(file)
-    model.optimize(primal_integral_callback)
+        position = True
+    elif anchor:
+        from GCN_class import GNNPolicy_class as GNNPolicy
+    else:
+        from GCN import GNNPolicy as GNNPolicy
 
-    # 计算 Primal Integral
-    gap_records = primal_integral_callback.gap_records
-    primal_integral = 0.0
+    TaskName = ModelName.split("_")[0]
+    pathstr = f'./models/{model_name}'
+    policy = GNNPolicy(TaskName, position=position).to(DEVICE)
+    state = torch.load(pathstr, map_location=DEVICE)
+    policy.load_state_dict(state)
+    policy.eval()
 
-    # 确保记录有数据
-    if len(gap_records) > 1:
-        for i in range(1, len(gap_records)):
-            t1, gap1 = gap_records[i - 1]
-            t2, gap2 = gap_records[i]
-            # 梯形积分法计算 Primal Integral
-            primal_integral += (gap1 + gap2) / 2 * (t2 - t1)
+    # set log folder
+    solver = 'GRB'
+    instanceName = 'CA'
+    test_task = f'{instanceName}_{solver}_Predect&Search'
+    k_0, k_1, delta = utils.test_hyperparam(instanceName)
+    sample_names = sorted(os.listdir(f'./instance/test/{instanceName}'))
 
-    print(f"Primal Integral: {primal_integral:.4f}")
+    subop_total = 0
+    num_fea = 0
+    time_total = 0
+    feasible_total = 0
+    mse_total = 0
+    ALL_Test = 30  # 30/60
+    epoch = 1
+    TestNum = round(ALL_Test / epoch)
+    if not gp_solve:
+        gp_obj_list = get_gp_best_objective(f'./logs/{instanceName}/{test_task}')
+    else:
+        gp_obj_list = []
+    for e in range(epoch):
+        for ins_num in range(TestNum):
+            t_start = time()
+            test_ins_name = sample_names[(0 + e) * TestNum + ins_num]
+            ins_name_to_read = f'./instance/test/{instanceName}/{test_ins_name}'
+            m = gp.read(ins_name_to_read)
+            if anchor:
+                v_class_name, c_class_name = get_pattern("./task_config.json", TaskName)
+                A, v_map, v_nodes, c_nodes, b_vars, v_class, c_class, _ = get_bigraph(ins_name_to_read, v_class_name,
+                                                                                      c_class_name)
+            else:
+                A, v_map, v_nodes, c_nodes, b_vars = get_a_new2(ins_name_to_read)
+
+            constraint_features = c_nodes.cpu()
+            variable_features = v_nodes
+            constraint_features[torch.isnan(constraint_features)] = 1  # remove nan value
+            # variable_features = getPE(v_nodes, position)
+            # if TaskName == "IP":
+            #     variable_features = postion_get(variable_features)
+            edge_indices = A._indices()
+            edge_features = A._values().unsqueeze(1)
+            # edge_features = torch.ones(edge_features.shape)
+            if anchor:
+                v_class = utils.convert_class_to_labels(v_class, variable_features.shape[0])
+                c_class = utils.convert_class_to_labels(c_class, constraint_features.shape[0])
+                BD = policy(
+                    constraint_features.to(DEVICE),
+                    edge_indices.to(DEVICE),
+                    edge_features.to(DEVICE),
+                    variable_features.to(DEVICE),
+                    torch.LongTensor(v_class).to(DEVICE),
+                    torch.LongTensor(c_class).to(DEVICE),
+                )
+                BD = BD.cpu().squeeze()
+            else:
+                BD = policy(
+                    constraint_features.to(DEVICE),
+                    edge_indices.to(DEVICE),
+                    edge_features.to(DEVICE),
+                    variable_features.to(DEVICE),
+                )
+                BD = BD[0].cpu().squeeze().sigmoid()
+
+
+            if gp_solve:
+                output_folder = f"./logs/{instanceName}/{TaskName}_GRB_sols"
+                os.makedirs(output_folder, exist_ok=True)
+                output_file = os.path.join(output_folder, f"{test_ins_name}.sol")
+                m.optimize()
+                obj = m.objVal
+                integer_sols = sorted(
+                    [(v.varName, v.x) for v in m.getVars() if v.vType in ['I', 'B']],  # 获取变量名和值
+                    key=lambda x: x[0]  # 按变量名字典序排序
+                )
+                integer_sols = [value for _, value in integer_sols]
+                if m.status in [GRB.OPTIMAL, GRB.TIME_LIMIT]:
+                    with open(output_file, "wb") as f:
+                        pickle.dump(integer_sols, f)
+            else:
+                obj = gp_obj_list[(0 + e) * TestNum + ins_num]
+
+            sols_files = f"./logs/{instanceName}/{TaskName}_GRB_sols"
+            sols_file = sols_files + "/" + test_ins_name + ".sol"
+            with open(sols_file, 'rb') as f:
+                sols = pickle.load(f)
+            n = len(sols)
+            # feasible rate of error
+            error = 0
+
+            if _type == "sol":
+                pre_sols_list = BD.round().tolist()  # 0/1 var
+                for pre_x, x in zip(pre_sols_list, sols):
+                    if pre_x != x:
+                        error += 1
+                feasible = 1 - error / n
+                feasible_total += feasible
+
+                # mse_var
+                sols_tensor = torch.tensor(sols)
+                mse = torch.mean((BD - sols_tensor) ** 2)
+                mse_total += mse
+
+            elif _type == "obj":
+                mse_obj = (BD - obj) ** 2 if (BD - obj) ** 2 >= 1e-6 else 0
+                mse_total += mse_obj
+            else:
+                raise ValueError("Invalid type!")
+
+            # x_proj, _ = project_to_feasible_region_and_get_tight_constraints(m, pre_sols_list)
+            # x_proj = x_proj.tolist()
+            #
+            # for var, value in zip(m.getVars(), x_proj):
+            #     var.start = value
+            # m.update()
+            # # m.optimize()
+            # if m.status == GRB.INFEASIBLE:
+            #     print("预测解不可行！")
+            # elif m.status in [GRB.OPTIMAL, GRB.TIME_LIMIT, GRB.SUBOPTIMAL]:
+            #     num_fea += 1
+            #     pre_obj = m.objVal
+            #     print(f"预测解可行，对应的目标值为：{pre_obj}")
+            #     subop = (pre_obj - obj) ** 2 if (pre_obj - obj) ** 2 >= 1e-6 else 0
+            #     subop_total += subop
+
+    mean_feasible = feasible_total / (epoch * TestNum)
+    mean_mse = mse_total / (epoch * TestNum)
+    mean_subop = subop_total / num_fea if num_fea != 0 else 0
+    print(f"mean_feasible: {mean_feasible}")
+    print(f"mean_mse: {mean_mse}")
+    print(f"mean_subop: {mean_subop}")
