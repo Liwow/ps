@@ -365,23 +365,26 @@ def pred_error(scores, test_ins_name, InstanceName, BD=None):
         sols = pickle.load(f)
 
     sorted_scores = sorted(scores, key=lambda x: x[0])
-    total_count = 0
-    correct_count = 0
+
+    local_count = 0
+    correct_count_local = 0
     for score, sol in zip(sorted_scores, sols):
         variable_value = score[3]  # scores 中的变量值
-        if variable_value in [0, 1]:  # 排除 -1 的情况
-            total_count += 1
-            if variable_value == sol:  # 比较值是否相同
-                correct_count += 1
-            else:
-                continue
-    error = total_count - correct_count
+        if variable_value in [0, 1]:
+            local_count += 1
+            if variable_value == sol:
+                correct_count_local += 1
+
+    error_local = local_count - correct_count_local
+
     if BD is None:
-        return error
+        return error_local
     else:
+        pre_sol = torch.round(BD)
         sols_tensor = torch.tensor(sols)
+        error_all = sum([1 for px, x in zip(pre_sol, sols_tensor) if px != x])
         mse = torch.mean((BD - sols_tensor) ** 2)
-        return error, mse
+        return error_local, error_all, mse
 
 
 if __name__ == "__main__":
@@ -403,6 +406,8 @@ if __name__ == "__main__":
         position = True
     elif anchor:
         from GCN_class import GNNPolicy_class as GNNPolicy
+    elif _type == "obj":
+        from GCN_graph import GNNPolicy_graph as GNNPolicy
     else:
         from GCN import GNNPolicy as GNNPolicy
 
@@ -474,7 +479,6 @@ if __name__ == "__main__":
                     variable_features.to(DEVICE),
                 )
                 BD = BD[0].cpu().squeeze().sigmoid()
-
 
             if gp_solve:
                 output_folder = f"./logs/{instanceName}/{TaskName}_GRB_sols"

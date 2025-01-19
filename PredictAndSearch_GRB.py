@@ -118,6 +118,7 @@ max_time = 0
 ps_int_total = 0
 gp_int_total = 0
 acc = 0
+acc_local = 0
 mse_total = 0
 ALL_Test = 30  # 33
 epoch = 1
@@ -234,10 +235,11 @@ for e in range(epoch):
             print("gp_int_total：", gp_int_total)
         else:
             obj = gp_obj_list[(0 + e) * TestNum + ins_num]
-        error, mse = pred_error(scores, test_ins_name, instanceName, BD)
-        acc = acc + 1 if error <= delta else acc
+        error_local, error_all, mse = pred_error(scores, test_ins_name, instanceName, BD)
+        acc += (1 - error_all / len(scores))
+        acc_local += (1 - error_local / (k_0 + k_1))
         mse_total += mse
-        print(f"gurobi 最优解：{obj}; pred_error is: {error}; mse is: {mse}")
+        print(f"gurobi 最优解：{obj}; pred_error_all is: {error_all}; mse is: {mse}")
         m.reset()
         m.Params.TimeLimit = TimeLimit
         m.Params.Threads = Threads
@@ -314,4 +316,5 @@ with open(results_dir + "results.json", "a") as file:
 print("avg_subopt： ", results['avg_subopt'])
 print("ps_gap_integral： ", results['ps_gap_integral'])
 print(f"pred_error: {round(acc / total_num, 4)}")
+print(f"pred_error_local: {round(acc_local / total_num, 4)}")
 print(f"mse: {mse_total / total_num}")
