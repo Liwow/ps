@@ -99,7 +99,7 @@ policy.eval()
 
 # set log folder
 solver = 'GRB'
-instanceName = "CA_big"
+instanceName = "CA"
 test_task = f'{instanceName}_{solver}_Predect&Search'
 if not os.path.isdir(f'./logs'):
     os.mkdir(f'./logs')
