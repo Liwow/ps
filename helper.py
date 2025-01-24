@@ -475,7 +475,7 @@ def get_a_new2(ins_name):
 
 def get_bigraph(ins_name, v_class_name=None, c_class_name=None, couple=0):
     epsilon = 1e-6
-
+    TaskName = ins_name.split('/')[-1].split('.')[0]
     # vars:  [obj coeff, norm_coeff, degree, Bin?]
     m = Model('model')
     m.hideOutput(True)
@@ -599,10 +599,16 @@ def get_bigraph(ins_name, v_class_name=None, c_class_name=None, couple=0):
         llc = max(len(coeff), 1)
         c_nodes.append([summation / llc, llc, rhs, sense])
         # Assign constraint to c_class based on prefix
-        for i, prefix in enumerate(c_class_name):
-            if c.name.startswith(prefix):
-                c_class[i].append(cind)
-                break
+        if TaskName.startswith("CA"):
+            if cind < 300:
+                c_class[0].append(cind)
+            else:
+                c_class[1].append(cind)
+        else:
+            for i, prefix in enumerate(c_class_name):
+                if c.name.startswith(prefix):
+                    c_class[i].append(cind)
+                    break
 
     c_nodes.append(obj_node)
     c_class[-1].append(len(c_nodes) - 1)

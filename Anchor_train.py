@@ -7,6 +7,9 @@ import warnings
 from torch.optim.lr_scheduler import LambdaLR
 from tqdm import tqdm
 import utils
+
+warnings.filterwarnings("ignore")
+
 seed = 3042
 random.seed(seed)
 torch.manual_seed(seed)
@@ -19,7 +22,6 @@ torch.backends.cudnn.benchmark = True
 TaskName = "CA"
 multimodal = False
 position = False
-warnings.filterwarnings("ignore")
 # set folder
 train_task = f'{TaskName}_train'
 if not os.path.isdir(f'./train_logs'):
@@ -36,7 +38,7 @@ log_file = open(f'{log_save_path}{train_task}_train.log', 'wb')
 
 # set params
 LEARNING_RATE = 0.001
-NB_EPOCHS = 20
+NB_EPOCHS = 200
 BATCH_SIZE = 1
 NUM_WORKERS = 0
 WEIGHT_NORM = 100
@@ -73,7 +75,7 @@ PredictModel = GNNPolicy(TaskName, position=position).to(DEVICE)
 
 
 def lr_lambda(epoch):
-    return 0.95 ** ((epoch + 1) // 4)
+    return 1 if epoch < 185 else 0.95 ** ((epoch + 1) // 5)
 
 
 def EnergyWeightNorm(task):
@@ -81,7 +83,7 @@ def EnergyWeightNorm(task):
         return 1
     elif task == "WA":
         return 100
-    elif task == "CA" or task == "CA_m" or task == "CA_multi":
+    elif task == "CA" or task == "CA_multi":
         return -4000
     elif task == "beasley":
         return 100

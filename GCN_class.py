@@ -505,10 +505,10 @@ class Anchor1(torch.nn.Module):
             torch.nn.Linear(emb_size, emb_size),
         )
         self.rec_var = torch.nn.Sequential(
-            torch.nn.Linear(self.v_n, emb_size),
+            torch.nn.Linear(2 * emb_size, emb_size),
         )
         self.rec_con = torch.nn.Sequential(
-            torch.nn.Linear(self.c_n, emb_size),
+            torch.nn.Linear(2 * emb_size, emb_size),
         )
         self.norm = nn.LayerNorm(emb_size)
 
@@ -525,7 +525,8 @@ class Anchor1(torch.nn.Module):
             v_i_fea = v_s[v_i_indices].unsqueeze(1)
             v_i_sem = v_sem[v_i].unsqueeze(0).unsqueeze(1)
             v_i_final = self.cross_att_var(v_i_sem, v_i_fea, v_i_fea)[0].squeeze(1)
-            v_i_final = self.norm(v_i_fea.squeeze(1) * v_i_final)
+            # v_i_final = self.norm(v_i_fea.squeeze(1) * v_i_final)
+            v_i_final = v_i_fea.squeeze(1) * self.rec_var(torch.cat([v_i_sem.squeeze(1), v_i_final], dim=-1))
             v_updates[v_i_indices] = v_i_final
 
         for c_i in range(self.c_n):
@@ -535,7 +536,8 @@ class Anchor1(torch.nn.Module):
             c_i_fea = c_s[c_i_indices].unsqueeze(1)
             c_i_sem = c_sem[c_i].unsqueeze(0).unsqueeze(1)
             c_i_final = self.cross_att_con(c_i_sem, c_i_fea, c_i_fea)[0].squeeze(1)
-            c_i_final = self.norm(c_i_fea.squeeze(1) * c_i_final)
+            # c_i_final = self.norm(c_i_fea.squeeze(1) * c_i_final)
+            c_i_final = c_i_fea.squeeze(1) * self.rec_con(torch.cat([c_i_sem.squeeze(1), c_i_final], dim=-1))
             c_updates[c_i_indices] = c_i_final
 
         return v_updates, c_updates

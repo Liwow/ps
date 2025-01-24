@@ -17,7 +17,7 @@ torch.backends.cudnn.benchmark = True
 
 # 4 public datasets, IS, WA, CA, IP
 # train task
-TaskName = "WA"
+TaskName = "CA"
 edl = False
 position = False
 warnings.filterwarnings("ignore")
@@ -37,13 +37,12 @@ log_file = open(f'{log_save_path}{train_task}_train.log', 'wb')
 
 # set params
 LEARNING_RATE = 0.001
-NB_EPOCHS = 100
-BATCH_SIZE = 1
+NB_EPOCHS = 200
+BATCH_SIZE = 4
 NUM_WORKERS = 0
 WEIGHT_NORM = 100
 
 # dataset task
-TaskName = "WA"
 DEVICE = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 DIR_BG = f'./dataset/{TaskName}/BG'
 DIR_SOL = f'./dataset/{TaskName}/solution'
@@ -51,7 +50,7 @@ sample_names = os.listdir(DIR_BG)
 sample_files = [(os.path.join(DIR_BG, name), os.path.join(DIR_SOL, name).replace('bg', 'sol')) for name in sample_names]
 train_files, valid_files = utils.split_sample_by_blocks(sample_files, 0.9, block_size=100)
 
-if TaskName == "IP_":
+if TaskName == "IP":
     # Add position embedding for IP model, due to the strong symmetry
     from GCN import GNNPolicy_position as GNNPolicy
     from GCN import GraphDataset_position as GraphDataset
@@ -74,7 +73,7 @@ PredictModel = GNNPolicy(TaskName, position=position).to(DEVICE)
 
 
 def lr_lambda(epoch):
-    return 0.95 ** ((epoch + 1) // 4)
+    return 1 if epoch < 160 else 0.95 ** ((epoch + 1) // 5)
 
 
 def EnergyWeightNorm(task):
@@ -82,7 +81,7 @@ def EnergyWeightNorm(task):
         return 1
     elif task == "WA":
         return 100
-    elif task == "CA" or task == "CA_m" or task == "CA_multi":
+    elif task == "CA":
         return -4000
     elif task == "beasley":
         return 100

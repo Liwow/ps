@@ -32,16 +32,6 @@ def split_sample_by_blocks(sample_files, train_rate, block_size):
     return train_files, valid_files
 
 
-def text_setting(task):
-    text = r"This is a description of an instance of a mixed-integer programming problem: "
-    if task == "CA" or task == "CA_m" or task == "CA_multi":
-        text += r"This is a combinatorial auction problem which can be formulated as an integer linear programming problem. It involves 300 items and 1500 bidding groups. " \
-                "The main objective is to maximize the total revenue from bidders while ensuring that each item is assigned to at most one bidder. " \
-                "The variable is defined as follows：x_j = 1 \text{ indicates that bidder} j \text{ 's combination S_j is selected}，x_j = 0 \text{ means it is not selected.}；" \
-                "The objective function is: \text{Maximize} \quad \sum_{j} v_j x_j, where v_j represents the bid value of bidder for the item combination S_j. The goal of the objective function is to maximize the total revenue from selected bids, aiming for the highest auction revenue. " \
-                "The constraint is:\sum_{j: i \in S_j} x_j \leq 1 \quad \forall i \in \text{Items}。which ensures that each item is assigned to at most one bidder, preventing duplicate allocation of any item."
-    return text
-
 
 def get_label_by_kmeans(list):
     X = np.array(list).reshape(-1, 1)
@@ -107,8 +97,7 @@ def convert_class_to_labels(class_, n):
     return labels
 
 
-
-def compare(pre_sol, sols, task, u=None):
+def compare(pre_sol, sols, task, is_local=False, u=None):
     # m 1 n 0
     n, m, delta = test_hyperparam(task)
     u0 = 0.5
@@ -116,8 +105,15 @@ def compare(pre_sol, sols, task, u=None):
 
     pre_sol_rounded = torch.round(pre_sol)
 
-    top_m_indices = sorted_indices[:m] if m > 0 else []
-    bottom_n_indices = sorted_indices[-n:] if n > 0 else []
+    if is_local:
+        top_m_indices = sorted_indices[:m] if m > 0 else []
+        bottom_n_indices = sorted_indices[-n:] if n > 0 else []
+    else:
+        l = len(sorted_indices)
+        m = int(l * 0.5)
+        n = l - m
+        top_m_indices = sorted_indices[:m] if m > 0 else []
+        bottom_n_indices = sorted_indices[-n:] if n > 0 else []
     if u is not None:
         top_m_indices = [idx for idx in top_m_indices if u[idx] < u0]
         bottom_n_indices = [idx for idx in bottom_n_indices if u[idx] < u0]
