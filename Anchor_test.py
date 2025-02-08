@@ -17,48 +17,6 @@ from helper import get_a_new2, get_bigraph, get_pattern
 from GCN_class import getPE
 from gp_tools import primal_integral_callback, get_gp_best_objective, pred_error
 
-# def modify(model, n=0, k=0, fix=0):
-#     # fix 0:no fix 1:随机 2:排序 3: 交集
-#     if model.Status not in [GRB.OPTIMAL, GRB.TIME_LIMIT]:
-#         print("No optimal solution found.")
-#         return
-#     slacks = {constr: constr.slack for constr in model.getConstrs() if constr.Sense in ['<', '>']}
-#     filter_indices = [
-#         model_to_filtered_index[i] for i in tc_1 if i in model_to_filtered_index
-#     ]
-#     most_tight_constraints, count_tight = test.get_most_tight_constraints(slacks, filter_indices)
-#     print(f"最优解和预测投影解中松弛度都为 0 的相同约束个数: {count_tight}")
-#     if fix == 0:
-#         print("****** do nothing! *********")
-#         return
-#     sorted_slacks = sorted(slacks.items(), key=lambda item: abs(item[1]), reverse=True)
-#     if n != 0:
-#         most_relaxed_constraints = [constr for constr, slack in sorted_slacks[:n]]
-#         print(f"Removing {n} most relaxed constraints.")
-#         for constr in most_relaxed_constraints:
-#             m.remove(constr)
-#
-#     tight_constraints = [constr for constr, slack in slacks.items() if slack == 0]
-#
-#     if fix == 1:
-#         print("groundtruth 固定约束,固定方式:随机")
-#         random.shuffle(tight_constraints)
-#         most_tight_constraints = tight_constraints[:k]
-#     elif fix == 2:
-#         print("groundtruth 固定约束,固定方式:排序")
-#         most_tight_constraints = [constr for constr, slack in sorted_slacks[-k:]] if k > 0 else []
-#     elif fix == 3:
-#         print("groundtruth 固定约束,固定方式:交集")
-#     for constr in most_tight_constraints:
-#         row = model.getRow(constr)
-#         coeffs = []
-#         vars = []
-#         for i in range(row.size()):
-#             coeffs.append(row.getCoeff(i))
-#             vars.append(row.getVar(i))
-#         model.remove(constr)
-#         model.addConstr(gurobipy.LinExpr(coeffs, vars) == constr.RHS, name=f"{constr.ConstrName}_tight")
-
 
 DEVICE = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 random.seed(0)
@@ -69,8 +27,8 @@ position = False
 gp_solve = False
 ps_solve = False
 Threads = 24
-TimeLimit = 800
-ModelName = "CA_anchor"
+TimeLimit = 14400
+ModelName = "WA_best"
 model_name = f'{ModelName}.pth'
 if ModelName == "CA_multi":
     multimodal = True
@@ -94,7 +52,7 @@ policy.eval()
 
 # set log folder
 solver = 'GRB'
-instanceName = 'CA'
+instanceName = 'WA'
 test_task = f'{instanceName}_{solver}_Predect&Search'
 if not os.path.isdir(f'./logs'):
     os.mkdir(f'./logs')
@@ -225,13 +183,15 @@ for e in range(epoch):
             if m.status in [GRB.OPTIMAL, GRB.TIME_LIMIT]:
                 with open(output_file, "wb") as f:
                     pickle.dump(integer_sols, f)
-
-            gap_records = primal_integral_callback.gap_records
+            if m.status == GRB.TIME_LIMIT:
+                primal_integral_callback.gap_records.append(
+                    (m.Runtime, abs((m.objVal - m.ObjBound) / abs(m.ObjBound))))
+            gp_gap_records = primal_integral_callback.gap_records
             primal_integral = 0.0
-            if len(gap_records) > 1:
-                for i in range(1, len(gap_records)):
-                    t1, gap1 = gap_records[i - 1]
-                    t2, gap2 = gap_records[i]
+            if len(gp_gap_records) > 1:
+                for i in range(1, len(gp_gap_records)):
+                    t1, gap1 = gp_gap_records[i - 1]
+                    t2, gap2 = gp_gap_records[i]
                     # 梯形积分法计算 Primal Integral
                     primal_integral += (gap1 + gap2) / 2 * (t2 - t1)
             gp_int_total += primal_integral
@@ -239,7 +199,7 @@ for e in range(epoch):
         else:
             obj = gp_obj_list[(0 + e) * TestNum + ins_num]
 
-        error_local, error_all, mse = pred_error(scores, test_ins_name, instanceName, BD)
+        error_local, error_all, mse = pred_error(scores, test_ins_name, instanceName, BD[b_vars])
         acc += (1 - error_all / len(scores))
         acc_local += (1 - error_local / (k_0+k_1))
         mse_total += mse
@@ -279,12 +239,15 @@ for e in range(epoch):
         else:
             pre_obj = 0
 
-        gap_records = primal_integral_callback.gap_records
+        if m.status == GRB.TIME_LIMIT:
+            primal_integral_callback.gap_records.append(
+                (m.Runtime, abs((m.objVal - m.ObjBound) / abs(m.ObjBound))))
+        ps_gap_records = primal_integral_callback.gap_records
         primal_integral = 0.0
-        if len(gap_records) > 1:
-            for i in range(1, len(gap_records)):
-                t1, gap1 = gap_records[i - 1]
-                t2, gap2 = gap_records[i]
+        if len(ps_gap_records) > 1:
+            for i in range(1, len(ps_gap_records)):
+                t1, gap1 = ps_gap_records[i - 1]
+                t2, gap2 = ps_gap_records[i]
                 # 梯形积分法计算 Primal Integral
                 primal_integral += (gap1 + gap2) / 2 * (t2 - t1)
 
@@ -313,6 +276,8 @@ results = {
     "max_time": round(max_time, 6),
     "gurobi_integral": round(gp_int_total / total_num, 6) if gp_solve else 0,
     "ps_gap_integral": round(ps_int_total / total_num, 6) if ps_solve else 0,
+    "gurobi_gap_bound": gp_gap_records[-1] if gp_solve else 0,
+    "ps_gap_bound": ps_gap_records[-1] if ps_solve else 0,
 }
 results_dir = f"/home/ljj/project/predict_and_search/results/{TaskName}/"
 if not os.path.isdir(results_dir):

@@ -19,7 +19,7 @@ torch.backends.cudnn.benchmark = True
 # this file is to train a predict model. given a instance's bipartite graph as input, the model predict the binary distribution.
 
 # train task
-TaskName = "CA"
+TaskName = "WA"
 multimodal = False
 position = False
 # set folder
@@ -75,7 +75,7 @@ PredictModel = GNNPolicy(TaskName, position=position).to(DEVICE)
 
 
 def lr_lambda(epoch):
-    return 1 if epoch < 185 else 0.95 ** ((epoch + 1) // 5)
+    return 1 if epoch < 4 else 0.95 ** ((epoch + 1) // 5)  # 185
 
 
 def EnergyWeightNorm(task):

@@ -223,19 +223,22 @@ for e in range(epoch):
                 with open(output_file, "wb") as f:
                     pickle.dump(integer_sols, f)
 
-            gap_records = primal_integral_callback.gap_records
+            if m.status == GRB.TIME_LIMIT:
+                primal_integral_callback.gap_records.append(
+                    (m.Runtime, abs((m.objVal - m.ObjBound) / abs(m.ObjBound))))
+            gp_gap_records = primal_integral_callback.gap_records
             primal_integral = 0.0
-            if len(gap_records) > 1:
-                for i in range(1, len(gap_records)):
-                    t1, gap1 = gap_records[i - 1]
-                    t2, gap2 = gap_records[i]
+            if len(gp_gap_records) > 1:
+                for i in range(1, len(gp_gap_records)):
+                    t1, gap1 = gp_gap_records[i - 1]
+                    t2, gap2 = gp_gap_records[i]
                     # 梯形积分法计算 Primal Integral
                     primal_integral += (gap1 + gap2) / 2 * (t2 - t1)
             gp_int_total += primal_integral
             print("gp_int_total：", gp_int_total)
         else:
             obj = gp_obj_list[(0 + e) * TestNum + ins_num]
-        error_local, error_all, mse = pred_error(scores, test_ins_name, instanceName, BD)
+        error_local, error_all, mse = pred_error(scores, test_ins_name, instanceName, BD[b_vars])
         acc += (1 - error_all / len(scores))
         acc_local += (1 - error_local / (k_0 + k_1))
         mse_total += mse
@@ -273,12 +276,16 @@ for e in range(epoch):
             pre_obj = m.objVal
         else:
             pre_obj = 0
-        gap_records = primal_integral_callback.gap_records
+
+        if m.status == GRB.TIME_LIMIT:
+            primal_integral_callback.gap_records.append(
+                (m.Runtime, abs((m.objVal - m.ObjBound) / abs(m.ObjBound))))
+        ps_gap_records = primal_integral_callback.gap_records
         primal_integral = 0.0
-        if len(gap_records) > 1:
-            for i in range(1, len(gap_records)):
-                t1, gap1 = gap_records[i - 1]
-                t2, gap2 = gap_records[i]
+        if len(ps_gap_records) > 1:
+            for i in range(1, len(ps_gap_records)):
+                t1, gap1 = ps_gap_records[i - 1]
+                t2, gap2 = ps_gap_records[i]
                 # 梯形积分法计算 Primal Integral
                 primal_integral += (gap1 + gap2) / 2 * (t2 - t1)
 
@@ -306,6 +313,8 @@ results = {
     "max_time": round(max_time, 6),
     "gurobi_integral": round(gp_int_total / total_num, 6) if gp_solve else 0,
     "ps_gap_integral": round(ps_int_total / total_num, 6) if ps_solve else 0,
+    "gurobi_gap_bound": gp_gap_records[-1] if gp_solve else 0,
+    "ps_gap_bound": ps_gap_records[-1] if ps_solve else 0,
 }
 results_dir = f"/home/ljj/project/predict_and_search/results/{TaskName}/"
 if not os.path.isdir(results_dir):

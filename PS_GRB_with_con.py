@@ -145,7 +145,7 @@ torch.cuda.manual_seed(0)
 multimodal = False
 is_solver = True
 # TaskName = "CA_m_ccon"
-TaskName = "case118"
+TaskName = "CA"
 if TaskName == "CA_multi":
     multimodal = True
 # load pretrained model
@@ -334,6 +334,7 @@ for e in range(epoch):
             os.makedirs(output_folder, exist_ok=True)
             output_file = os.path.join(output_folder, f"{test_ins_name}.sol")
             m.optimize()
+            gp_bound = m.objBound
             obj = m.objVal
             integer_sols = sorted(
                 [(v.varName, v.x) for v in m.getVars() if v.vType in ['I', 'B']],  # 获取变量名和值
@@ -384,6 +385,7 @@ for e in range(epoch):
 
         # todo 这里是计算subopt，需要改成optv
         if m.status in [GRB.OPTIMAL, GRB.TIME_LIMIT]:
+            ps_bound = m.objBound
             pre_obj = m.objVal
             subop = (pre_obj - obj) / (obj + 1e-8) if TaskName == "CA" else (obj - pre_obj) / (obj + 1e-8)
             subop_total += subop
@@ -398,6 +400,8 @@ results = {
     "avg_subopt": round(subop_total / total_num, 6),
     "mean_time_pred_ps": round(time_total_ps / total_num, 6),
     "mean_time_solver": round(time_totol_solver / total_num, 6),
+    "gurobi_gap_bound": abs(gp_bound - obj) / abs(obj) if is_solver else 0,
+    "ps_gap_bound": abs(ps_bound - pre_obj) / abs(ps_bound),
 }
 
 with open(results_dir + "results.json", "a") as file:
