@@ -633,7 +633,7 @@ class GraphDataset_constraint(torch_geometric.data.Dataset):
         BG, sols, objs, varNames, slacks = self.process_sample(self.sample_files[index])
         critical_list_by_sparse, var_num_list = self.get_critical(self.sample_files[index], method="kmeans")
 
-        A, v_map, v_nodes, c_nodes, b_vars = BG
+        A, v_map, v_nodes, c_nodes, b_vars, _, _ = BG
         # sparse_cluster, labels = utils.get_label_by_kmeans(coupling_degrees)
         # critical_list_by_coupling = [1 if label == sparse_cluster else 0 for label in labels]
 

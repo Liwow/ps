@@ -23,7 +23,7 @@ DEVICE = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 TaskName = "CA"
 warnings.filterwarnings("ignore")
 # set folder
-train_task = f'{TaskName}_train'
+train_task = f'{TaskName}_con_train'
 if not os.path.isdir(f'./train_logs'):
     os.mkdir(f'./train_logs')
 if not os.path.isdir(f'./train_logs/{train_task}'):

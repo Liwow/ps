@@ -55,7 +55,7 @@ k_0, k_1, _ = test_hyperparam(TaskName)
 
 # set log folder
 solver = 'SCIP'
-test_task = f'{TaskName}_{solver}_Predect&Search'
+test_task = f'{TaskName}_{solver}_Predict&Search'
 if not os.path.isdir(f'./logs'):
     os.mkdir(f'./logs')
 if not os.path.isdir(f'./logs/{TaskName}'):

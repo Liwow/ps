@@ -20,6 +20,7 @@ DEVICE = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 Threads = 18
 TimeLimit = 1000
 
+
 # def modify(model, n=0, k=0, fix=0):
 #     # fix 0:no fix 1:随机 2:排序 3: 交集
 #     if model.Status not in [GRB.OPTIMAL, GRB.TIME_LIMIT]:
@@ -143,9 +144,9 @@ random.seed(0)
 torch.manual_seed(0)
 torch.cuda.manual_seed(0)
 multimodal = False
-is_solver = True
+is_solver = False
 # TaskName = "CA_m_ccon"
-TaskName = "CA"
+TaskName = "CA_con_0"
 if TaskName == "CA_multi":
     multimodal = True
 # load pretrained model
@@ -165,7 +166,7 @@ policy.load_state_dict(state)
 
 policy.eval()
 # todo 在这里修改测试数据集 case1951rte case2868rte case2869pegase
-TaskName = 'case1951rte'
+TaskName = 'CA'
 
 
 def test_hyperparam(task):
@@ -180,7 +181,7 @@ def test_hyperparam(task):
     elif task == "WA":
         return 0, 500, 10
     elif task == "CA":  # 600 0 1
-        return 600, 0, 1, 10
+        return 600, 0, 1, 20
     elif task == "beasley":
         return 50, 17, 10
     elif task == "ns":
@@ -216,9 +217,9 @@ if not os.path.isdir(f'./logs'):
     os.mkdir(f'./logs')
 if not os.path.isdir(f'./logs/{TaskName}'):
     os.mkdir(f'./logs/{TaskName}')
-if not os.path.isdir(f'./logs/{TaskName}/{test_task}'):
-    os.mkdir(f'./logs/{TaskName}/{test_task}')
-log_folder = f'./logs/{TaskName}/{test_task}'
+log_folder = f'./logs/{TaskName}/{test_task}_con'  # 这里修改log位置
+if not os.path.isdir(log_folder):
+    os.mkdir(log_folder)
 
 # todo 这里是设置结果保存的文件夹，路径需要修改
 results_dir = f"/home/ljj/project/predict_and_search/results/{TaskName}/"
@@ -233,7 +234,8 @@ time_total_ps = 0
 time_totol_solver = 0
 
 # todo 这里可以修改测试的instance数量
-ALL_Test = len(sample_names)
+# ALL_Test = len(sample_names)
+ALL_Test = 30
 epoch = 1
 TestNum = round(ALL_Test / epoch)
 
@@ -387,7 +389,7 @@ for e in range(epoch):
         if m.status in [GRB.OPTIMAL, GRB.TIME_LIMIT]:
             ps_bound = m.objBound
             pre_obj = m.objVal
-            subop = (pre_obj - obj) / (obj + 1e-8) if TaskName == "CA" else (obj - pre_obj) / (obj + 1e-8)
+            subop = (pre_obj - obj) / (obj + 1e-8) if TaskName != "CA" else (obj - pre_obj) / (obj + 1e-8)
             subop_total += subop
             print(
                 f"solver 最优值：{obj}; ps 最优值：{pre_obj}; subopt: {round(subop / (ins_num + 1), 6)}; pred_error: {round(acc / (ins_num + 1), 4)}")
