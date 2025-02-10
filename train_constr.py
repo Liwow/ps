@@ -20,7 +20,7 @@ DEVICE = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 
 # 4 public datasets, IS, WA, CA, IP
 # train model task
-TaskName = "case118"
+TaskName = "CA"
 warnings.filterwarnings("ignore")
 # set folder
 train_task = f'{TaskName}_train'

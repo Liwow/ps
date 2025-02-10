@@ -75,7 +75,7 @@ Threads = 24
 TimeLimit = 3600
 gap_threshold = 0.005
 # edl, ca
-ModelName = "WA"
+ModelName = "CA"
 if ModelName == "CA_edl" or ModelName == "CA_fisher":
     edl = True
 model_name = f'{ModelName}.pth'
@@ -100,7 +100,7 @@ policy.eval()
 
 # set log folder
 solver = 'GRB'
-instanceName = "WA"
+instanceName = "CA"
 test_task = f'{instanceName}_{solver}_Predect&Search'
 if not os.path.isdir(f'./logs'):
     os.mkdir(f'./logs')
