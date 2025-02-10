@@ -73,7 +73,7 @@ gp_solve = True
 ps_solve = True
 Threads = 24
 TimeLimit = 3600
-gap_bound = 0.005
+gap_threshold = 0.005
 # edl, ca
 ModelName = "WA"
 if ModelName == "CA_edl" or ModelName == "CA_fisher":
@@ -211,6 +211,8 @@ for e in range(epoch):
 
         if gp_solve:
             primal_integral_callback.gap_records = []
+            primal_integral_callback.gap_threshold = gap_threshold
+            primal_integral_callback.point = None
             output_folder = f"./logs/{instanceName}/{TaskName}_GRB_sols"
             os.makedirs(output_folder, exist_ok=True)
             output_file = os.path.join(output_folder, f"{test_ins_name}.sol")
@@ -229,11 +231,7 @@ for e in range(epoch):
                 primal_integral_callback.gap_records.append(
                     (m.Runtime, abs((m.objVal - m.ObjBound) / abs(m.ObjBound))))
             gp_gap_records = primal_integral_callback.gap_records
-            if len(gp_gap_records) != 0:
-                for t, gap in gp_gap_records:
-                    if gap <= gap_bound:
-                        gp_gap_time += t
-                        break
+            ps_gap_time += primal_integral_callback.point[0] if primal_integral_callback.point is not None else 0
             primal_integral = 0.0
             if len(gp_gap_records) > 1:
                 for i in range(1, len(gp_gap_records)):
@@ -279,6 +277,8 @@ for e in range(epoch):
         t_start = time()
         m.update()
         primal_integral_callback.gap_records = []
+        primal_integral_callback.gap_threshold = gap_threshold
+        primal_integral_callback.point = None
         if ps_solve:
             m.optimize(primal_integral_callback)
             pre_obj = m.objVal
@@ -289,11 +289,7 @@ for e in range(epoch):
             primal_integral_callback.gap_records.append(
                 (m.Runtime, abs((m.objVal - m.ObjBound) / abs(m.ObjBound))))
         ps_gap_records = primal_integral_callback.gap_records
-        if len(ps_gap_records) != 0:
-            for t, gap in ps_gap_records:
-                if gap <= gap_bound:
-                    ps_gap_time += t
-                    break
+        ps_gap_time += primal_integral_callback.point[0] if primal_integral_callback.point is not None else 0
         primal_integral = 0.0
         if len(ps_gap_records) > 1:
             for i in range(1, len(ps_gap_records)):

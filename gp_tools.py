@@ -355,6 +355,9 @@ def primal_integral_callback(model, where):
             primal_gap = abs((ub - lb) / abs(lb))
             # 记录时间点和对应的 Primal Gap
             primal_integral_callback.gap_records.append((time_elapsed, primal_gap))
+            if primal_gap <= primal_integral_callback.gap_threshold:
+                if primal_integral_callback.point is None:
+                    primal_integral_callback.point = (time_elapsed, primal_gap)
 
 
 def pred_error(scores, test_ins_name, InstanceName, BD=None):
