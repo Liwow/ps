@@ -44,7 +44,7 @@ NUM_WORKERS = 0
 WEIGHT_NORM = 100
 
 # dataset task
-TaskName = "case118"
+TaskName = "CA"
 DIR_BG = f'./dataset/{TaskName}/BG'
 DIR_SOL = f'./dataset/{TaskName}/solution'
 sample_names = os.listdir(DIR_BG)
@@ -73,7 +73,7 @@ PredictModel = GNNPolicy(TaskName).to(DEVICE)
 
 
 def lr_lambda(epoch):
-    return 0.95 ** ((epoch + 1) // 5)
+    return 1 if epoch < 185 else 0.95 ** ((epoch + 1) // 5)
 
 
 def EnergyWeightNorm(task):
