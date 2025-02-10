@@ -69,12 +69,13 @@ torch.manual_seed(0)
 torch.cuda.manual_seed(0)
 edl = False
 position = False
-gp_solve = False
-ps_solve = False
+gp_solve = True
+ps_solve = True
 Threads = 24
-TimeLimit = 800
+TimeLimit = 3600
+gap_bound = 0.005
 # edl, ca
-ModelName = "CA"
+ModelName = "WA"
 if ModelName == "CA_edl" or ModelName == "CA_fisher":
     edl = True
 model_name = f'{ModelName}.pth'
@@ -99,7 +100,7 @@ policy.eval()
 
 # set log folder
 solver = 'GRB'
-instanceName = "CA"
+instanceName = "WA"
 test_task = f'{instanceName}_{solver}_Predect&Search'
 if not os.path.isdir(f'./logs'):
     os.mkdir(f'./logs')
@@ -117,10 +118,12 @@ max_subop = -1
 max_time = 0
 ps_int_total = 0
 gp_int_total = 0
+gp_gap_time = 0
+ps_gap_time = 0
 acc = 0
 acc_local = 0
 mse_total = 0
-ALL_Test = 30  # 33
+ALL_Test = 15  # 33
 epoch = 1
 TestNum = round(ALL_Test / epoch)
 
@@ -131,8 +134,7 @@ else:
 
 for e in range(epoch):
     for ins_num in range(TestNum):
-        t_start = time()
-        test_ins_name = sample_names[(0 + e) * TestNum + ins_num]
+        test_ins_name = sample_names[(0 + e) * TestNum + ins_num + 4]
         ins_name_to_read = f'./instance/test/{instanceName}/{test_ins_name}'
         # get bipartite graph as input
         A, v_map, v_nodes, c_nodes, b_vars = get_a_new2(ins_name_to_read)
@@ -227,6 +229,11 @@ for e in range(epoch):
                 primal_integral_callback.gap_records.append(
                     (m.Runtime, abs((m.objVal - m.ObjBound) / abs(m.ObjBound))))
             gp_gap_records = primal_integral_callback.gap_records
+            if len(gp_gap_records) != 0:
+                for t, gap in gp_gap_records:
+                    if gap <= gap_bound:
+                        gp_gap_time += t
+                        break
             primal_integral = 0.0
             if len(gp_gap_records) > 1:
                 for i in range(1, len(gp_gap_records)):
@@ -269,6 +276,7 @@ for e in range(epoch):
         for tmp in alphas:
             all_tmp += tmp
         m.addConstr(all_tmp <= delta, name="sum_alpha")
+        t_start = time()
         m.update()
         primal_integral_callback.gap_records = []
         if ps_solve:
@@ -281,6 +289,11 @@ for e in range(epoch):
             primal_integral_callback.gap_records.append(
                 (m.Runtime, abs((m.objVal - m.ObjBound) / abs(m.ObjBound))))
         ps_gap_records = primal_integral_callback.gap_records
+        if len(ps_gap_records) != 0:
+            for t, gap in ps_gap_records:
+                if gap <= gap_bound:
+                    ps_gap_time += t
+                    break
         primal_integral = 0.0
         if len(ps_gap_records) > 1:
             for i in range(1, len(ps_gap_records)):
@@ -313,8 +326,8 @@ results = {
     "max_time": round(max_time, 6),
     "gurobi_integral": round(gp_int_total / total_num, 6) if gp_solve else 0,
     "ps_gap_integral": round(ps_int_total / total_num, 6) if ps_solve else 0,
-    "gurobi_gap_bound": gp_gap_records[-1] if gp_solve else 0,
-    "ps_gap_bound": ps_gap_records[-1] if ps_solve else 0,
+    "gurobi_gap_bound": round(gp_gap_time / total_num, 6) if gp_solve else 0,
+    "ps_gap_bound": round(ps_gap_time / total_num, 6) if ps_solve else 0,
 }
 results_dir = f"/home/ljj/project/predict_and_search/results/{TaskName}/"
 if not os.path.isdir(results_dir):

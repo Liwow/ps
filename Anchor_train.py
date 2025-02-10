@@ -75,7 +75,7 @@ PredictModel = GNNPolicy(TaskName, position=position).to(DEVICE)
 
 
 def lr_lambda(epoch):
-    return 1 if epoch < 4 else 0.95 ** ((epoch + 1) // 5)  # 185
+    return 1 if epoch < 50 else 0.95 ** ((epoch + 1) // 5)  # 185
 
 
 def EnergyWeightNorm(task):

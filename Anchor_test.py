@@ -27,8 +27,9 @@ position = False
 gp_solve = False
 ps_solve = False
 Threads = 24
-TimeLimit = 14400
-ModelName = "WA_best"
+TimeLimit = 3600
+gap_bound = 0.005
+ModelName = "WA_anchor"
 model_name = f'{ModelName}.pth'
 if ModelName == "CA_multi":
     multimodal = True
@@ -70,10 +71,12 @@ max_subop = -1
 max_time = 0
 ps_int_total = 0
 gp_int_total = 0
+gp_gap_time = 0
+ps_gap_time = 0
 acc = 0
 acc_local = 0
 mse_total = 0
-ALL_Test = 30  # 30/60
+ALL_Test = 15  # 30/60
 epoch = 1
 TestNum = round(ALL_Test / epoch)
 if not gp_solve:
@@ -82,7 +85,6 @@ else:
     gp_obj_list = []
 for e in range(epoch):
     for ins_num in range(TestNum):
-        t_start = time()
         test_ins_name = sample_names[(0 + e) * TestNum + ins_num]
         ins_name_to_read = f'./instance/test/{instanceName}/{test_ins_name}'
         # get bipartite graph as input
@@ -187,6 +189,11 @@ for e in range(epoch):
                 primal_integral_callback.gap_records.append(
                     (m.Runtime, abs((m.objVal - m.ObjBound) / abs(m.ObjBound))))
             gp_gap_records = primal_integral_callback.gap_records
+            if len(gp_gap_records) != 0:
+                for t, gap in gp_gap_records:
+                    if gap <= gap_bound:
+                        gp_gap_time += t
+                        break
             primal_integral = 0.0
             if len(gp_gap_records) > 1:
                 for i in range(1, len(gp_gap_records)):
@@ -230,6 +237,7 @@ for e in range(epoch):
         for tmp in alphas:
             all_tmp += tmp
         m.addConstr(all_tmp <= delta, name="sum_alpha")
+        t_start = time()
         m.update()
         primal_integral_callback.gap_records = []
 
@@ -243,6 +251,11 @@ for e in range(epoch):
             primal_integral_callback.gap_records.append(
                 (m.Runtime, abs((m.objVal - m.ObjBound) / abs(m.ObjBound))))
         ps_gap_records = primal_integral_callback.gap_records
+        if len(ps_gap_records) != 0:
+            for t, gap in ps_gap_records:
+                if gap <= gap_bound:
+                    ps_gap_time += t
+                    break
         primal_integral = 0.0
         if len(ps_gap_records) > 1:
             for i in range(1, len(ps_gap_records)):
@@ -276,8 +289,8 @@ results = {
     "max_time": round(max_time, 6),
     "gurobi_integral": round(gp_int_total / total_num, 6) if gp_solve else 0,
     "ps_gap_integral": round(ps_int_total / total_num, 6) if ps_solve else 0,
-    "gurobi_gap_bound": gp_gap_records[-1] if gp_solve else 0,
-    "ps_gap_bound": ps_gap_records[-1] if ps_solve else 0,
+    "gurobi_gap_bound": round(gp_gap_time / total_num, 6) if gp_solve else 0,
+    "ps_gap_bound": round(ps_gap_time / total_num, 6) if ps_solve else 0,
 }
 results_dir = f"/home/ljj/project/predict_and_search/results/{TaskName}/"
 if not os.path.isdir(results_dir):
