@@ -134,7 +134,7 @@ else:
 
 for e in range(epoch):
     for ins_num in range(TestNum):
-        test_ins_name = sample_names[(0 + e) * TestNum + ins_num + 4]
+        test_ins_name = sample_names[(0 + e) * TestNum + ins_num]
         ins_name_to_read = f'./instance/test/{instanceName}/{test_ins_name}'
         # get bipartite graph as input
         A, v_map, v_nodes, c_nodes, b_vars = get_a_new2(ins_name_to_read)
